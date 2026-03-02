@@ -1,0 +1,31 @@
+{
+  "service": {
+    "name": "git-config",
+    "description": "Git configuration service for BPMN Workflow Platform",
+    "port": 8082
+  },
+  "git": {
+    "defaultBranch": "main",
+    "author": {
+      "name": "BPMN Workflow",
+      "email": "bpmn@workflow.local"
+    },
+    "repository": {
+      "basePath": "/data/repos",
+      "defaultProtocol": "https"
+    }
+  },
+  "storage": {
+    "type": "filesystem",
+    "path": "/data"
+  },
+  "webhook": {
+    "enabled": true,
+    "secret": "change-me-in-production"
+  },
+  "limits": {
+    "maxRepoSize": "5GB",
+    "maxFileSize": "100MB",
+    "maxBranches": 50
+  }
+}

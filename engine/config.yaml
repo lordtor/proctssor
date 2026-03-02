@@ -1,0 +1,23 @@
+# BPMN Workflow Engine Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+database:
+  url: "${DATABASE_URL}"
+  max_open_conns: 25
+  max_idle_conns: 5
+  conn_max_lifetime: 300
+
+nats:
+  url: "${NATS_URL}"
+  timeout: 30
+
+workflow:
+  max_instances: 1000
+  task_timeout: 3600
+
+logging:
+  level: "info"
+  format: "json"
