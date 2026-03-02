@@ -13,11 +13,11 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
+# Copy all source code
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o engine .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o engine ./cmd/engine/
 
 # Final stage
 FROM alpine:3.19
