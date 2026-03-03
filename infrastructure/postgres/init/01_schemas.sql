@@ -224,6 +224,7 @@ CREATE TABLE timer_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     instance_id UUID REFERENCES process_instances(id) ON DELETE CASCADE,
     node_id VARCHAR(255) NOT NULL,
+    token_id VARCHAR(255),
     timer_type VARCHAR(64) NOT NULL,
     due_date TIMESTAMP WITH TIME ZONE NOT NULL,
     repeat_interval INTERVAL,
