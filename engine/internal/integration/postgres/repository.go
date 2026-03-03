@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -250,6 +251,25 @@ type InstanceFilter struct {
 	Offset     int
 }
 
+// TaskFilter filters user tasks
+type TaskFilter struct {
+	Assignee   string
+	InstanceID string
+	Status     string
+}
+
+// UserTask represents a user task
+type UserTask struct {
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	InstanceID   string                 `json:"instance_id"`
+	ProcessDefID string                 `json:"process_definition_id"`
+	Assignee     string                 `json:"assignee"`
+	CreatedAt    time.Time              `json:"created_at"`
+	DueDate      *time.Time             `json:"due_date"`
+	Variables    map[string]interface{} `json:"variables"`
+}
+
 // PostgresInstanceRepository implements InstanceRepository
 type PostgresInstanceRepository struct {
 	db *DB
@@ -470,6 +490,73 @@ func (r *PostgresInstanceRepository) ListInstances(ctx context.Context, filter I
 	}
 
 	return instances, nil
+}
+
+// GetTasks gets user tasks based on filter
+func (r *PostgresInstanceRepository) GetTasks(ctx context.Context, filter TaskFilter) ([]UserTask, error) {
+	// Build a single optimized query using JOIN
+	query := `
+		SELECT ut.id, ut.name, ut.instance_id, ut.process_definition_id, ut.assignee, ut.created_at, ut.due_date, ut.variables
+		FROM user_tasks ut
+		INNER JOIN process_instances pi ON ut.instance_id = pi.id
+		WHERE pi.status = 'active'
+	`
+	args := []interface{}{}
+	argNum := 1
+
+	if filter.Assignee != "" {
+		query += fmt.Sprintf(" AND ut.assignee = $%d", argNum)
+		args = append(args, filter.Assignee)
+		argNum++
+	}
+	if filter.InstanceID != "" {
+		query += fmt.Sprintf(" AND ut.instance_id = $%d", argNum)
+		args = append(args, filter.InstanceID)
+		argNum++
+	}
+	if filter.Status != "" {
+		query += fmt.Sprintf(" AND ut.status = $%d", argNum)
+		args = append(args, filter.Status)
+	}
+
+	query += " ORDER BY ut.created_at DESC LIMIT 100"
+
+	rows, err := r.db.GetDB().QueryContext(ctx, query, args...)
+	if err != nil {
+		// Log the error for debugging but don't fail completely
+		log.Printf("GetTasks query error: %v", err)
+		return nil, fmt.Errorf("failed to fetch tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []UserTask
+	for rows.Next() {
+		var task UserTask
+		var dueDate sql.NullTime
+		var variablesJSON []byte
+
+		err := rows.Scan(&task.ID, &task.Name, &task.InstanceID, &task.ProcessDefID, &task.Assignee, &task.CreatedAt, &dueDate, &variablesJSON)
+		if err != nil {
+			log.Printf("GetTasks scan error: %v", err)
+			continue
+		}
+
+		if dueDate.Valid {
+			task.DueDate = &dueDate.Time
+		}
+		if err := json.Unmarshal(variablesJSON, &task.Variables); err != nil {
+			log.Printf("GetTasks unmarshal variables error for task %s: %v", task.ID, err)
+			task.Variables = make(map[string]interface{})
+		}
+
+		tasks = append(tasks, task)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("GetTasks rows error: %v", err)
+	}
+
+	return tasks, nil
 }
 
 // EventRepository handles process event persistence

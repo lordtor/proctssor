@@ -177,13 +177,14 @@ export default function Modeler() {
     try {
       const { xml } = await modelerRef.current.saveXML({ format: true });
       
-      await axios.post('/api/processes/deploy', {
+      await axios.post('/api/v1/processes/deploy', {
+        process_key: processName.replace(/\s+/g, '_'),
         name: processName,
-        version: processVersion,
-        xml,
+        xml: xml,
+        version: parseInt(processVersion) || 1,
       });
 
-      setStatus({ type: 'success', message: `Process "${processName}" deployed successfully` });
+      setStatus({ type: 'success', message: `Process deployed successfully` });
     } catch (err: any) {
       setStatus({ type: 'error', message: err.message || 'Failed to deploy process' });
     }

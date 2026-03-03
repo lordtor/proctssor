@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import BpmnViewer from 'bpmn-js/lib/Viewer';
 import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-js.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn-embedded.css';
+import axios from 'axios';
 import { Token } from '../store';
 
 interface DiagramViewerProps {
@@ -80,31 +81,52 @@ export default function DiagramViewer({ processDefinitionId, tokens }: DiagramVi
   const canvasRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
 
+  const [bpmnXml, setBpmnXml] = useState<string | null>(null);
+
+  // Load BPMN XML from backend
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!processDefinitionId) return;
+
+    axios.get(`/api/v1/processes/${processDefinitionId}/xml`)
+      .then(res => {
+        setBpmnXml(res.data.bpmn_xml);
+      })
+      .catch(err => {
+        console.warn('Failed to load diagram, using default:', err);
+        setBpmnXml(defaultDiagram);
+      });
+  }, [processDefinitionId]);
+
+  useEffect(() => {
+    if (!canvasRef.current || !bpmnXml) return;
 
     const viewer = new BpmnViewer({
       container: canvasRef.current,
     });
 
-    viewer.importXML(defaultDiagram).catch(console.error);
+    viewer.importXML(bpmnXml).catch(console.error);
     viewerRef.current = viewer;
 
     return () => {
       viewer.destroy();
     };
-  }, [processDefinitionId]);
+  }, [bpmnXml, processDefinitionId]);
 
   useEffect(() => {
     if (!viewerRef.current || tokens.length === 0) return;
 
     const canvas = viewerRef.current.get('canvas');
     const elementRegistry = viewerRef.current.get('elementRegistry');
-
+    
+    // Clear previous markers first
+    canvas.removeMarker('highlight');
+    canvas.removeMarker('active');
+    
+    // Apply new markers
     tokens.forEach((token) => {
       const element = elementRegistry.get(token.elementId);
       if (element) {
-        canvas.addMarker(element.id, 'highlight');
+        canvas.addMarker(element.id, token.status === 'active' ? 'active' : 'highlight');
       }
     });
   }, [tokens]);

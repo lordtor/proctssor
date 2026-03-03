@@ -109,6 +109,9 @@ func (r *Router) SetupRoutes() {
 			instances.PUT("/:id/variables", r.instanceHandler.UpdateVariables)
 		}
 
+		// Tasks list endpoint
+		v1.GET("/tasks", r.instanceHandler.ListTasks)
+
 		// Registry endpoints
 		registryGroup := v1.Group("/registry")
 		{

@@ -62,7 +62,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   fetchInstances: async () => {
     set({ loading: true, error: null });
     try {
-      const response = await axios.get('/api/instances');
+      const response = await axios.get('/api/v1/instances');
       set({ instances: response.data, loading: false });
     } catch (err: any) {
       set({ error: err.message, loading: false });
@@ -80,8 +80,8 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const [tokensRes, eventsRes] = await Promise.all([
-        axios.get(`/api/instances/${instanceId}/tokens`),
-        axios.get(`/api/instances/${instanceId}/events`),
+        axios.get(`/api/v1/instances/${instanceId}/tokens`),
+        axios.get(`/api/v1/instances/${instanceId}/events`),
       ]);
       set({ 
         tokens: tokensRes.data, 
@@ -96,7 +96,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   terminateInstance: async (instanceId) => {
     set({ loading: true, error: null });
     try {
-      await axios.post(`/api/instances/${instanceId}/terminate`);
+      await axios.post(`/api/v1/instances/${instanceId}/terminate`);
       await get().fetchInstances();
       set({ loading: false });
     } catch (err: any) {
@@ -107,7 +107,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   suspendInstance: async (instanceId) => {
     set({ loading: true, error: null });
     try {
-      await axios.post(`/api/instances/${instanceId}/suspend`);
+      await axios.post(`/api/v1/instances/${instanceId}/suspend`);
       await get().fetchInstances();
       set({ loading: false });
     } catch (err: any) {
@@ -118,7 +118,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   resumeInstance: async (instanceId) => {
     set({ loading: true, error: null });
     try {
-      await axios.post(`/api/instances/${instanceId}/resume`);
+      await axios.post(`/api/v1/instances/${instanceId}/resume`);
       await get().fetchInstances();
       set({ loading: false });
     } catch (err: any) {

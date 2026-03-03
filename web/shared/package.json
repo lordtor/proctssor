@@ -1,0 +1,21 @@
+{
+  "name": "@wf/shared",
+  "version": "1.0.0",
+  "description": "Workflow Platform - Shared utilities",
+  "private": true,
+  "type": "module",
+  "main": "./src/lib/api.ts",
+  "types": "./src/lib/api.ts",
+  "exports": {
+    "./api": "./src/lib/api.ts",
+    "./hooks/useWebSocket": "./src/hooks/useWebSocket.ts",
+    "./hooks/useSSE": "./src/hooks/useSSE.ts",
+    "./utils/formGenerator": "./src/utils/formGenerator.ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0"
+  }
+}

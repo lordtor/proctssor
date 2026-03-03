@@ -38,7 +38,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const { filter } = get();
-      let url = '/api/tasks';
+      let url = '/api/v1/tasks';
       if (filter === 'assigned') url += '?assigned=true';
       if (filter === 'unassigned') url += '?assigned=false';
       
@@ -56,7 +56,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   completeTask: async (taskId, variables) => {
     set({ loading: true, error: null });
     try {
-      await axios.post(`/api/tasks/${taskId}/complete`, { variables });
+      await axios.post(`/api/v1/tasks/${taskId}/complete`, variables);
       await get().fetchTasks();
       set({ selectedTask: null, loading: false });
     } catch (err: any) {
@@ -67,7 +67,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   claimTask: async (taskId) => {
     set({ loading: true, error: null });
     try {
-      await axios.post(`/api/tasks/${taskId}/claim`);
+      await axios.post(`/api/v1/tasks/${taskId}/claim`);
       await get().fetchTasks();
       set({ loading: false });
     } catch (err: any) {
@@ -78,7 +78,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   unclaimTask: async (taskId) => {
     set({ loading: true, error: null });
     try {
-      await axios.post(`/api/tasks/${taskId}/unclaim`);
+      await axios.post(`/api/v1/tasks/${taskId}/unclaim`);
       await get().fetchTasks();
       set({ loading: false });
     } catch (err: any) {

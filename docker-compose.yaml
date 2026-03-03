@@ -46,7 +46,11 @@ services:
     networks:
       - bpmn-network
     command: ["-c", "/nats/nats.conf"]
-    # Healthcheck temporarily disabled
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   # Nginx Reverse Proxy
   nginx:
@@ -60,8 +64,10 @@ services:
     volumes:
       - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - engine
-      - web
+      engine:
+        condition: service_started
+      web:
+        condition: service_started
     networks:
       - bpmn-network
 
@@ -76,7 +82,12 @@ services:
       dockerfile: Dockerfile
     container_name: bpmn-engine
     environment:
-      DATABASE_URL: postgres://bpmn:bpmn_secret@postgres:5432/bpmn?sslmode=disable
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: bpmn
+      DB_PASSWORD: bpmn_secret
+      DB_NAME: bpmn
+      DB_SSLMODE: disable
       NATS_URL: nats://nats:4222
       PORT: 8080
     ports:
@@ -85,7 +96,7 @@ services:
       postgres:
         condition: service_healthy
       nats:
-        condition: service_started
+        condition: service_healthy
     networks:
       - bpmn-network
     restart: unless-stopped

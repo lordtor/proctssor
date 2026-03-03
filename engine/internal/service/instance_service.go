@@ -452,3 +452,8 @@ func (s *InstanceService) GetTaskForm(ctx context.Context, instanceID, taskID st
 		"form_schema": map[string]interface{}{},
 	}, nil
 }
+
+// GetTasks returns user tasks based on filter
+func (s *InstanceService) GetTasks(ctx context.Context, filter postgres.TaskFilter) ([]postgres.UserTask, error) {
+	return s.instanceRepo.GetTasks(ctx, filter)
+}

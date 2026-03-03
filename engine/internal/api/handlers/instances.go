@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/workflow-engine/v2/internal/integration/postgres"
 	"github.com/workflow-engine/v2/internal/service"
 )
 
@@ -113,6 +114,29 @@ func (h *InstanceHandler) List(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, instances)
+}
+
+// ListTasks godoc
+// @Summary List user tasks
+// @Description Get list of user tasks for the current user
+// @Tags tasks
+// @Produce json
+// @Param assignee query string false "Filter by assignee"
+// @Success 200 {array} postgres.UserTask
+// @Router /api/v1/tasks [get]
+func (h *InstanceHandler) ListTasks(c *gin.Context) {
+	filter := postgres.TaskFilter{
+		Assignee: c.Query("assignee"),
+		Status:   c.Query("status"),
+	}
+
+	tasks, err := h.instanceService.GetTasks(c.Request.Context(), filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, tasks)
 }
 
 // GetByID godoc
