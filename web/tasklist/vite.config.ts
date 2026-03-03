@@ -14,6 +14,7 @@ export default defineConfig({
       shared: {
         react: { singleton: true, requiredVersion: '^18.2.0', eager: true },
         'react-dom': { singleton: true, requiredVersion: '^18.2.0', eager: true },
+        'react-router-dom': { singleton: true, requiredVersion: '^6.20.0' },
       },
     }),
   ],
