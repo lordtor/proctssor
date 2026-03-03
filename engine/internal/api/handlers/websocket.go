@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 	ws "github.com/workflow-engine/v2/internal/api/websocket"
 )
 
@@ -34,7 +33,7 @@ func (h *WebSocketHandler) HandleWebSocket(c *gin.Context) {
 	}
 
 	// Upgrade HTTP connection to WebSocket
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	conn, err := ws.Upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
 	}
@@ -50,11 +49,4 @@ func (h *WebSocketHandler) HandleWebSocket(c *gin.Context) {
 	go client.ReadPump()
 }
 
-// upgrader upgrades HTTP connections to WebSocket
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in development
-	},
-}
+// Handler functions use the exported Upgrader from websocket package

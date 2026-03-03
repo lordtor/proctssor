@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -167,11 +169,37 @@ func (c *Client) sendError(message string) {
 	c.sendJSON(map[string]string{"type": "error", "message": message})
 }
 
-// Upgrader upgrades HTTP connections to WebSocket
-var upgrader = websocket.Upgrader{
+// Upgrader exported for handlers
+var Upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in development
+		// Get origin from request
+		origin := r.Header.Get("Origin")
+		// In development, allow all origins
+		if os.Getenv("GIN_MODE") == "debug" || os.Getenv("ENV") == "development" {
+			return true
+		}
+		// In production, validate against allowed origins
+		allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
+		if allowedOrigins != "" {
+			allowed := false
+			for _, o := range strings.Split(allowedOrigins, ",") {
+				if strings.TrimSpace(o) == origin {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				log.Printf("[WARN] WebSocket origin rejected: %s (allowed: %s)", origin, allowedOrigins)
+				return false
+			}
+			return true
+		}
+		// No origin header is fine (same-origin request)
+		if origin == "" {
+			return true
+		}
+		return false
 	},
 }

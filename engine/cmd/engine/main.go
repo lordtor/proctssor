@@ -10,9 +10,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
+
+	"github.com/workflow-engine/v2/internal/api"
+	"github.com/workflow-engine/v2/internal/api/websocket"
+	"github.com/workflow-engine/v2/internal/core/executor"
+	"github.com/workflow-engine/v2/internal/integration/nats"
+	"github.com/workflow-engine/v2/internal/integration/postgres"
+	"github.com/workflow-engine/v2/internal/integration/registry"
+	"github.com/workflow-engine/v2/internal/service"
 )
 
 const (
@@ -29,6 +36,12 @@ type Config struct {
 	Port        string
 	DatabaseURL string
 	NATSURL     string
+	DBHost      string
+	DBPort      int
+	DBUser      string
+	DBPassword  string
+	DBName      string
+	DBSSLMode   string
 }
 
 // NewConfig creates configuration from environment
@@ -37,6 +50,12 @@ func NewConfig() *Config {
 		Port:        getEnv("PORT", defaultPort),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		NATSURL:     getEnv("NATS_URL", "nats://localhost:4222"),
+		DBHost:      getEnv("DB_HOST", "localhost"),
+		DBPort:      5432,
+		DBUser:      getEnv("DB_USER", "postgres"),
+		DBPassword:  getEnv("DB_PASSWORD", "postgres"),
+		DBName:      getEnv("DB_NAME", "workflow"),
+		DBSSLMode:   getEnv("DB_SSLMODE", "disable"),
 	}
 }
 
@@ -79,62 +98,82 @@ func main() {
 		zap.String("port", cfg.Port),
 	)
 
-	// Set Gin mode
-	gin.SetMode(gin.ReleaseMode)
-
-	// Create router
-	router := gin.New()
-	router.Use(gin.Recovery())
-	router.Use(gin.Logger())
-
-	// Health check endpoint
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "healthy",
-			"service":   appName,
-			"version":   appVersion,
-			"timestamp": time.Now().UTC(),
-		})
-	})
-
-	// Readiness endpoint
-	router.GET("/ready", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ready": true})
-	})
-
-	// API v1 routes
-	v1 := router.Group("/api/v1")
-	{
-		// Workflows
-		workflows := v1.Group("/workflows")
-		{
-			workflows.GET("", listWorkflows)
-			workflows.POST("", createWorkflow)
-			workflows.GET("/:id", getWorkflow)
-		}
-
-		// Processes
-		processes := v1.Group("/processes")
-		{
-			processes.GET("", listProcesses)
-			processes.POST("", startProcess)
-			processes.GET("/:id", getProcess)
-			processes.POST("/:id/complete", completeTask)
-		}
-
-		// Tasks
-		tasks := v1.Group("/tasks")
-		{
-			tasks.GET("", listTasks)
-			tasks.GET("/:id", getTask)
-			tasks.POST("/:id/claim", claimTask)
-		}
+	// Initialize database
+	pgCfg := postgres.Config{
+		Host:     cfg.DBHost,
+		Port:     cfg.DBPort,
+		User:     cfg.DBUser,
+		Password: cfg.DBPassword,
+		DBName:   cfg.DBName,
+		SSLMode:  cfg.DBSSLMode,
 	}
+	db, err := postgres.NewDB(pgCfg)
+	if err != nil {
+		logger.Fatal("Failed to connect to database", zap.Error(err))
+	}
+	defer db.Close()
+
+	// Initialize repositories
+	processRepo := postgres.NewProcessRepository(db)
+	instanceRepo := postgres.NewInstanceRepository(db)
+	eventRepo := postgres.NewEventRepository(db)
+	registryRepo := registry.NewRegistryRepository(db)
+
+	// Initialize NATS publisher
+	var natsPublisher *nats.Publisher
+	natsPublisher, err = nats.NewPublisher(nats.PublisherConfig{
+		URL: cfg.NATSURL,
+	})
+	if err != nil {
+		logger.Warn("Failed to connect to NATS", zap.Error(err))
+		// Continue without NATS
+	}
+	if natsPublisher != nil {
+		defer natsPublisher.Close()
+	}
+
+	// Initialize WebSocket hub
+	wsHub := websocket.NewHub()
+	go wsHub.Run()
+
+	// Initialize registry cache
+	registryCache := registry.NewCache()
+	registryCacheUpdater := registry.NewCacheUpdater(registryCache, registryRepo)
+	if err := registryCacheUpdater.Refresh(context.Background()); err != nil {
+		logger.Warn("Failed to refresh registry cache", zap.Error(err))
+	}
+
+	// Initialize executor
+	exec := executor.NewExecutor(registryCache, natsPublisher, logger)
+
+	// Initialize instance service
+	instanceService := service.NewInstanceService(
+		processRepo,
+		instanceRepo,
+		eventRepo,
+		exec,
+		natsPublisher,
+		wsHub,
+		logger,
+	)
+
+	// Create router with all dependencies
+	router := api.NewRouter(api.RouterDependencies{
+		Logger:          logger,
+		ProcessRepo:     processRepo,
+		InstanceRepo:    instanceRepo,
+		EventRepo:       eventRepo,
+		RegistryRepo:    registryRepo,
+		InstanceService: instanceService,
+		NatsPublisher:   natsPublisher,
+		WebSocketHub:    wsHub,
+	})
+	router.SetupRoutes()
 
 	// Create HTTP server
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: router,
+		Handler: router.GetEngine(),
 	}
 
 	// Start server in goroutine
@@ -161,124 +200,4 @@ func main() {
 
 	logger.Info("Server exited")
 	fmt.Println("BPMN Workflow Engine stopped")
-}
-
-// Handlers
-
-// @Summary List all workflows
-// @Description Get all workflow definitions
-// @Tags workflows
-// @Produce json
-// @Success 200 {array} interface{}
-func listWorkflows(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"workflows": []interface{}{}})
-}
-
-// @Summary Create a new workflow
-// @Description Create a new workflow definition
-// @Tags workflows
-// @Accept json
-// @Produce json
-// @Success 201 {object} interface{}
-func createWorkflow(c *gin.Context) {
-	c.JSON(http.StatusCreated, gin.H{
-		"id":      "new-workflow-id",
-		"message": "Workflow created",
-	})
-}
-
-// @Summary Get workflow by ID
-// @Description Get a specific workflow by ID
-// @Tags workflows
-// @Produce json
-// @Param id path string true "Workflow ID"
-// @Success 200 {object} interface{}
-func getWorkflow(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"id":          id,
-		"name":        "Example Workflow",
-		"description": "Example BPMN workflow",
-	})
-}
-
-// @Summary List all processes
-// @Description Get all running processes
-// @Tags processes
-// @Produce json
-// @Success 200 {array} interface{}
-func listProcesses(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"processes": []interface{}{}})
-}
-
-// @Summary Start a new process
-// @Description Start a new process from a workflow
-// @Tags processes
-// @Accept json
-// @Produce json
-// @Success 201 {object} interface{}
-func startProcess(c *gin.Context) {
-	c.JSON(http.StatusCreated, gin.H{
-		"id":     "new-process-id",
-		"status": "started",
-	})
-}
-
-// @Summary Get process by ID
-// @Description Get a specific process by ID
-// @Tags processes
-// @Produce json
-// @Param id path string true "Process ID"
-// @Success 200 {object} interface{}
-func getProcess(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"id":     id,
-		"status": "running",
-	})
-}
-
-// @Summary Complete a task
-// @Description Complete a task in a process
-// @Tags processes
-// @Accept json
-// @Produce json
-// @Param id path string true "Process ID"
-// @Success 200 {object} interface{}
-func completeTask(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "Task completed"})
-}
-
-// @Summary List all tasks
-// @Description Get all available tasks
-// @Tags tasks
-// @Produce json
-// @Success 200 {array} interface{}
-func listTasks(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"tasks": []interface{}{}})
-}
-
-// @Summary Get task by ID
-// @Description Get a specific task by ID
-// @Tags tasks
-// @Produce json
-// @Param id path string true "Task ID"
-// @Success 200 {object} interface{}
-func getTask(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"id":     id,
-		"status": "pending",
-	})
-}
-
-// @Summary Claim a task
-// @Description Claim a task for a user
-// @Tags tasks
-// @Accept json
-// @Produce json
-// @Param id path string true "Task ID"
-// @Success 200 {object} interface{}
-func claimTask(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "Task claimed"})
 }

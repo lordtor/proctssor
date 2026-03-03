@@ -11,11 +11,11 @@ import (
 
 // RegistryHandler handles registry-related HTTP requests
 type RegistryHandler struct {
-	repo *registry.PostgresRegistryRepository
+	repo registry.RegistryRepository
 }
 
 // NewRegistryHandler creates a new registry handler
-func NewRegistryHandler(repo *registry.PostgresRegistryRepository) *RegistryHandler {
+func NewRegistryHandler(repo registry.RegistryRepository) *RegistryHandler {
 	return &RegistryHandler{repo: repo}
 }
 
@@ -233,6 +233,29 @@ func (h *RegistryHandler) GetActions(c *gin.Context) {
 		"service_name": service.Name,
 		"service_type": service.Type,
 		"endpoint":     service.Endpoint,
+		"actions":      service.Metadata,
+	})
+}
+
+// GetServiceActions godoc
+// @Summary Get service actions
+// @Description Get available actions for a service
+// @Tags registry
+// @Produce json
+// @Param name path string true "Service Name"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/registry/services/{name}/actions [get]
+func (h *RegistryHandler) GetServiceActions(c *gin.Context) {
+	name := c.Param("name")
+
+	service, err := h.repo.DiscoverByName(c.Request.Context(), name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "service not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"service_name": service.Name,
 		"actions":      service.Metadata,
 	})
 }

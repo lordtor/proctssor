@@ -6,7 +6,34 @@ import (
 
 	"github.com/workflow-engine/v2/internal/core/bpmn"
 	"github.com/workflow-engine/v2/internal/core/statemachine"
+	"github.com/workflow-engine/v2/internal/integration/nats"
+	"go.uber.org/zap"
 )
+
+// Context keys for execution context
+type contextKey string
+
+const (
+	ContextKeyInstanceID contextKey = "instance_id"
+	ContextKeyNodeID     contextKey = "node_id"
+	ContextKeyNodeName   contextKey = "node_name"
+)
+
+// GetInstanceID retrieves instance ID from context
+func GetInstanceID(ctx context.Context) string {
+	if id, ok := ctx.Value(ContextKeyInstanceID).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// GetNodeID retrieves node ID from context
+func GetNodeID(ctx context.Context) string {
+	if id, ok := ctx.Value(ContextKeyNodeID).(string); ok {
+		return id
+	}
+	return ""
+}
 
 // Executor executes BPMN nodes
 type Executor struct {
@@ -31,13 +58,27 @@ type VariableManager interface {
 
 // DefaultExecutor is the default implementation of Executor
 type DefaultExecutor struct {
-	taskHandlers map[string]TaskHandler
+	taskHandlers  map[string]TaskHandler
+	registryCache interface {
+		Get(ctx context.Context, name string) (interface{}, bool)
+	}
+	natsPublisher *nats.Publisher
+	logger        *zap.Logger
 }
 
 // NewExecutor creates a new executor
-func NewExecutor() *DefaultExecutor {
+func NewExecutor(
+	registryCache interface {
+		Get(ctx context.Context, name string) (interface{}, bool)
+	},
+	natsPublisher *nats.Publisher,
+	logger *zap.Logger,
+) *DefaultExecutor {
 	return &DefaultExecutor{
-		taskHandlers: make(map[string]TaskHandler),
+		taskHandlers:  make(map[string]TaskHandler),
+		registryCache: registryCache,
+		natsPublisher: natsPublisher,
+		logger:        logger,
 	}
 }
 
@@ -123,7 +164,7 @@ func (e *DefaultExecutor) executeServiceTask(ctx context.Context, node *bpmn.Ser
 		return e.executeExpression(ctx, node.Expression, variables)
 	}
 	if node.DelegateExpression != "" {
-		return e.executeDelegateExpression(ctx, node.DelegateExpression, variables)
+		return e.executeDelegateExpression(ctx, node.DelegateExpression, variables, GetInstanceID(ctx), GetNodeID(ctx), node.GetName())
 	}
 	if node.Topic != "" {
 		return e.executeExternalTask(ctx, node.Topic, variables)
@@ -146,14 +187,6 @@ func (e *DefaultExecutor) executeDelegateClass(ctx context.Context, class string
 // executeExpression executes an expression
 func (e *DefaultExecutor) executeExpression(ctx context.Context, expression string, variables map[string]interface{}) (*statemachine.ExecutionResult, error) {
 	// TODO: Implement expression execution
-	return &statemachine.ExecutionResult{
-		Variables: variables,
-	}, nil
-}
-
-// executeDelegateExpression executes a delegate expression
-func (e *DefaultExecutor) executeDelegateExpression(ctx context.Context, expression string, variables map[string]interface{}) (*statemachine.ExecutionResult, error) {
-	// TODO: Implement delegate expression execution
 	return &statemachine.ExecutionResult{
 		Variables: variables,
 	}, nil

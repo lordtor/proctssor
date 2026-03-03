@@ -157,6 +157,9 @@ type ProcessInstance struct {
 	// Tokens holds all active tokens
 	Tokens map[string]*Token `json:"tokens"`
 
+	// LastActivityAt is the last activity timestamp
+	LastActivityAt time.Time `json:"last_activity_at"`
+
 	// CreatedAt is when the instance was created
 	CreatedAt time.Time `json:"created_at"`
 

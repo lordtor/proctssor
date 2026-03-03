@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/workflow-engine/v2/internal/integration/nats"
 )
 
 // SSEHandler handles Server-Sent Events
 type SSEHandler struct {
 	taskNotifier     *TaskNotifier
 	registryNotifier *RegistryNotifier
+	responseHandler  *nats.ResponseHandler
 }
 
 // TaskNotifier notifies about task updates
@@ -91,10 +93,11 @@ func (r *RegistryNotifier) Notify(data interface{}) {
 }
 
 // NewSSEHandler creates a new SSE handler
-func NewSSEHandler() *SSEHandler {
+func NewSSEHandler(responseHandler *nats.ResponseHandler) *SSEHandler {
 	return &SSEHandler{
 		taskNotifier:     NewTaskNotifier(),
 		registryNotifier: NewRegistryNotifier(),
+		responseHandler:  responseHandler, // May be nil - handlers should check before use
 	}
 }
 

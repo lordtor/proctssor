@@ -8,7 +8,7 @@ import (
 )
 
 // Logger returns a gin middleware for logging
-func Logger(logger *zap.SugaredLogger) gin.HandlerFunc {
+func Logger(logger *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
@@ -18,25 +18,25 @@ func Logger(logger *zap.SugaredLogger) gin.HandlerFunc {
 		latency := time.Since(start)
 		status := c.Writer.Status()
 
-		logger.Infow("request",
-			"method", c.Request.Method,
-			"path", path,
-			"status", status,
-			"latency", latency.String(),
-			"client_ip", c.ClientIP(),
-			"user_agent", c.Request.UserAgent(),
+		logger.Info("request",
+			zap.String("method", c.Request.Method),
+			zap.String("path", path),
+			zap.Int("status", status),
+			zap.Duration("latency", latency),
+			zap.String("client_ip", c.ClientIP()),
+			zap.String("user_agent", c.Request.UserAgent()),
 		)
 	}
 }
 
 // Recovery returns a gin middleware for panic recovery
-func Recovery(logger *zap.SugaredLogger) gin.HandlerFunc {
+func Recovery(logger *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				logger.Errorw("panic recovered",
-					"error", err,
-					"path", c.Request.URL.Path,
+				logger.Error("panic recovered",
+					zap.Any("error", err),
+					zap.String("path", c.Request.URL.Path),
 				)
 				c.AbortWithStatusJSON(500, gin.H{
 					"error": "Internal server error",

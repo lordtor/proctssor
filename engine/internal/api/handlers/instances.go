@@ -6,21 +6,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/workflow-engine/v2/internal/core/statemachine"
-	"github.com/workflow-engine/v2/internal/integration/postgres"
+	"github.com/workflow-engine/v2/internal/service"
 )
 
 // InstanceHandler handles instance-related HTTP requests
 type InstanceHandler struct {
-	instanceRepo *postgres.PostgresInstanceRepository
-	processRepo  *postgres.PostgresProcessRepository
+	instanceService *service.InstanceService
 }
 
-// NewInstanceHandler creates a new instance handler
-func NewInstanceHandler(instanceRepo *postgres.PostgresInstanceRepository, processRepo *postgres.PostgresProcessRepository) *InstanceHandler {
+// NewInstanceHandler creates a new instance handler with Service Layer
+func NewInstanceHandler(instanceService *service.InstanceService) *InstanceHandler {
 	return &InstanceHandler{
-		instanceRepo: instanceRepo,
-		processRepo:  processRepo,
+		instanceService: instanceService,
 	}
 }
 
@@ -60,28 +57,22 @@ func (h *InstanceHandler) Start(c *gin.Context) {
 		processKey = c.GetString("process_key")
 	}
 
-	// Get process definition
-	process, _, err := h.processRepo.GetProcessByKey(c.Request.Context(), processKey)
+	// Вызываем Service Layer - он делает всю работу
+	instance, err := h.instanceService.StartInstance(
+		c.Request.Context(),
+		processKey,
+		req.Variables,
+		"", // business key
+		req.Initiator,
+	)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Process not found: " + err.Error()})
-		return
-	}
-
-	// Create new instance
-	instance := statemachine.NewProcessInstance(processKey, req.Variables)
-	instance.Status = statemachine.ProcessInstanceStatusRunning
-	now := time.Now()
-	instance.StartedAt = &now
-
-	// Save to database
-	if err := h.instanceRepo.CreateInstance(c.Request.Context(), instance); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusCreated, StartResponse{
 		InstanceID: instance.ID,
-		ProcessID:  process.ID,
+		ProcessID:  processKey,
 		Status:     string(instance.Status),
 		Variables:  instance.Variables,
 		StartedAt:  instance.StartedAt.Format(time.RFC3339),
@@ -96,10 +87,10 @@ func (h *InstanceHandler) Start(c *gin.Context) {
 // @Param process_key query string false "Filter by process key"
 // @Param status query string false "Filter by status"
 // @Param limit query int false "Limit results"
-// @Success 200 {array} statemachine.ProcessInstance
+// @Success 200 {array} service.InstanceInfo
 // @Router /api/v1/instances [get]
 func (h *InstanceHandler) List(c *gin.Context) {
-	filter := postgres.InstanceFilter{
+	filter := service.InstanceFilter{
 		ProcessKey: c.Query("process_key"),
 		Status:     c.Query("status"),
 	}
@@ -110,14 +101,15 @@ func (h *InstanceHandler) List(c *gin.Context) {
 		}
 	}
 
-	instances, err := h.instanceRepo.ListInstances(c.Request.Context(), filter)
+	// Используем Service Layer
+	instances, err := h.instanceService.ListInstances(c.Request.Context(), filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	if instances == nil {
-		instances = []*statemachine.ProcessInstance{}
+		instances = []*service.InstanceInfo{}
 	}
 
 	c.JSON(http.StatusOK, instances)
@@ -129,12 +121,13 @@ func (h *InstanceHandler) List(c *gin.Context) {
 // @Tags instances
 // @Produce json
 // @Param id path string true "Instance ID"
-// @Success 200 {object} statemachine.ProcessInstance
+// @Success 200 {object} service.InstanceInfo
 // @Router /api/v1/instances/{id} [get]
 func (h *InstanceHandler) GetByID(c *gin.Context) {
 	id := c.Param("id")
 
-	instance, err := h.instanceRepo.GetInstanceByID(c.Request.Context(), id)
+	// Используем Service Layer
+	instance, err := h.instanceService.GetInstance(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -153,27 +146,15 @@ func (h *InstanceHandler) GetByID(c *gin.Context) {
 func (h *InstanceHandler) Suspend(c *gin.Context) {
 	id := c.Param("id")
 
-	instance, err := h.instanceRepo.GetInstanceByID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
-
-	if instance.Status != statemachine.ProcessInstanceStatusRunning {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance is not running"})
-		return
-	}
-
-	instance.Status = statemachine.ProcessInstanceStatusSuspended
-
-	if err := h.instanceRepo.UpdateInstance(c.Request.Context(), instance); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// Используем Service Layer
+	if err := h.instanceService.SuspendInstance(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"instance_id": instance.ID,
-		"status":      instance.Status,
+		"instance_id": id,
+		"status":      "suspended",
 	})
 }
 
@@ -187,27 +168,15 @@ func (h *InstanceHandler) Suspend(c *gin.Context) {
 func (h *InstanceHandler) Resume(c *gin.Context) {
 	id := c.Param("id")
 
-	instance, err := h.instanceRepo.GetInstanceByID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
-
-	if instance.Status != statemachine.ProcessInstanceStatusSuspended {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance is not suspended"})
-		return
-	}
-
-	instance.Status = statemachine.ProcessInstanceStatusRunning
-
-	if err := h.instanceRepo.UpdateInstance(c.Request.Context(), instance); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// Используем Service Layer
+	if err := h.instanceService.ResumeInstance(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"instance_id": instance.ID,
-		"status":      instance.Status,
+		"instance_id": id,
+		"status":      "running",
 	})
 }
 
@@ -221,30 +190,15 @@ func (h *InstanceHandler) Resume(c *gin.Context) {
 func (h *InstanceHandler) Terminate(c *gin.Context) {
 	id := c.Param("id")
 
-	instance, err := h.instanceRepo.GetInstanceByID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
-
-	if instance.Status == statemachine.ProcessInstanceStatusCompleted ||
-		instance.Status == statemachine.ProcessInstanceStatusTerminated {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Instance already terminated or completed"})
-		return
-	}
-
-	now := time.Now()
-	instance.Status = statemachine.ProcessInstanceStatusTerminated
-	instance.CompletedAt = &now
-
-	if err := h.instanceRepo.UpdateInstance(c.Request.Context(), instance); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// Используем Service Layer
+	if err := h.instanceService.TerminateInstance(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"instance_id": instance.ID,
-		"status":      instance.Status,
+		"instance_id": id,
+		"status":      "terminated",
 	})
 }
 
@@ -259,13 +213,14 @@ func (h *InstanceHandler) Terminate(c *gin.Context) {
 func (h *InstanceHandler) GetVariables(c *gin.Context) {
 	id := c.Param("id")
 
-	instance, err := h.instanceRepo.GetInstanceByID(c.Request.Context(), id)
+	// Используем Service Layer
+	variables, err := h.instanceService.GetVariables(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, instance.Variables)
+	c.JSON(http.StatusOK, variables)
 }
 
 // UpdateVariablesRequest represents a variable update request
@@ -292,21 +247,75 @@ func (h *InstanceHandler) UpdateVariables(c *gin.Context) {
 		return
 	}
 
-	instance, err := h.instanceRepo.GetInstanceByID(c.Request.Context(), id)
+	// Используем Service Layer
+	variables, err := h.instanceService.UpdateVariables(c.Request.Context(), id, req.Variables)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, variables)
+}
+
+// CompleteTaskRequest represents a task completion request
+type CompleteTaskRequest struct {
+	Variables map[string]interface{} `json:"variables"`
+	UserID    string                 `json:"user_id"`
+}
+
+// CompleteTask godoc
+// @Summary Complete a user task
+// @Description Complete a user task in a process instance
+// @Tags instances
+// @Accept json
+// @Produce json
+// @Param id path string true "Instance ID"
+// @Param taskId path string true "Task ID"
+// @Param request body CompleteTaskRequest true "Task completion request"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/instances/{id}/tasks/{taskId}/complete [post]
+func (h *InstanceHandler) CompleteTask(c *gin.Context) {
+	instanceID := c.Param("id")
+	taskID := c.Param("taskId")
+
+	var req CompleteTaskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.Variables = make(map[string]interface{})
+	}
+
+	err := h.instanceService.CompleteUserTask(
+		c.Request.Context(),
+		instanceID,
+		taskID,
+		req.Variables,
+		req.UserID,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Task completed"})
+}
+
+// GetTaskForm godoc
+// @Summary Get task form
+// @Description Get the form schema for a user task
+// @Tags instances
+// @Produce json
+// @Param id path string true "Instance ID"
+// @Param taskId path string true "Task ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/instances/{id}/tasks/{taskId}/form [get]
+func (h *InstanceHandler) GetTaskForm(c *gin.Context) {
+	instanceID := c.Param("id")
+	taskID := c.Param("taskId")
+
+	form, err := h.instanceService.GetTaskForm(c.Request.Context(), instanceID, taskID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Merge variables
-	for k, v := range req.Variables {
-		instance.Variables[k] = v
-	}
-
-	if err := h.instanceRepo.UpdateInstance(c.Request.Context(), instance); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, instance.Variables)
+	c.JSON(http.StatusOK, form)
 }

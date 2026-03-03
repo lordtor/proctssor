@@ -7,16 +7,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/workflow-engine/v2/internal/core/bpmn"
 	"github.com/workflow-engine/v2/internal/integration/postgres"
+	"go.uber.org/zap"
 )
 
 // ProcessHandler handles process-related HTTP requests
 type ProcessHandler struct {
-	repo *postgres.PostgresProcessRepository
+	repo   *postgres.PostgresProcessRepository
+	logger *zap.Logger
 }
 
 // NewProcessHandler creates a new process handler
-func NewProcessHandler(repo *postgres.PostgresProcessRepository) *ProcessHandler {
-	return &ProcessHandler{repo: repo}
+func NewProcessHandler(repo *postgres.PostgresProcessRepository, logger *zap.Logger) *ProcessHandler {
+	return &ProcessHandler{repo: repo, logger: logger}
 }
 
 // DeployRequest represents a process deployment request
@@ -105,7 +107,7 @@ func (h *ProcessHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, processes)
 }
 
-// GetByID godoc
+// Get godoc
 // @Summary Get process by ID
 // @Description Get a specific process definition by ID
 // @Tags processes
@@ -113,12 +115,13 @@ func (h *ProcessHandler) List(c *gin.Context) {
 // @Param id path string true "Process ID"
 // @Success 200 {object} map[string]interface{}
 // @Router /api/v1/processes/{id} [get]
-func (h *ProcessHandler) GetByID(c *gin.Context) {
+func (h *ProcessHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 
 	process, definition, err := h.repo.GetProcessByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		h.logger.Error("Failed to get process", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusNotFound, gin.H{"error": "process not found"})
 		return
 	}
 
@@ -130,6 +133,18 @@ func (h *ProcessHandler) GetByID(c *gin.Context) {
 		"flows":         len(process.SequenceFlow),
 		"definition":    string(definition),
 	})
+}
+
+// GetByID godoc
+// @Summary Get process by ID (alias for Get)
+// @Description Get a specific process definition by ID
+// @Tags processes
+// @Produce json
+// @Param id path string true "Process ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/processes/{id} [get]
+func (h *ProcessHandler) GetByID(c *gin.Context) {
+	h.Get(c)
 }
 
 // GetXML godoc
