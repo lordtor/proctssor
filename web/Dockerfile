@@ -1,31 +1,53 @@
-# BPMN Workflow Platform - Web Frontend Dockerfile
+# BPMN Workflow Platform - Web Frontend Multi-stage Dockerfile
+# Builds all micro-frontends with Module Federation support
 
-# Build stage
-FROM node:20-alpine AS builder
+# Stage 1: Build Shell (Host)
+FROM node:20-alpine AS shell-builder
 
-# Set working directory
-WORKDIR /app
-
-# Copy package files
-COPY package.json package-lock.json* ./
-
-# Install dependencies
+WORKDIR /app/shell
+COPY shell/package*.json ./
 RUN npm install
-
-# Copy source code
-COPY . .
-
-# Build the application
+COPY shell/ ./
 RUN npm run build
 
-# Production stage
+# Stage 2: Build Modeler
+FROM node:20-alpine AS modeler-builder
+
+WORKDIR /app/modeler
+COPY modeler/package*.json ./
+RUN npm install
+COPY modeler/ ./
+RUN npm run build
+
+# Stage 3: Build Tasklist
+FROM node:20-alpine AS tasklist-builder
+
+WORKDIR /app/tasklist
+COPY tasklist/package*.json ./
+RUN npm install
+COPY tasklist/ ./
+RUN npm run build
+
+# Stage 4: Build Monitor
+FROM node:20-alpine AS monitor-builder
+
+WORKDIR /app/monitor
+COPY monitor/package*.json ./
+RUN npm install
+COPY monitor/ ./
+RUN npm run build
+
+# Stage 5: Production with Nginx
 FROM nginx:1.25-alpine
 
-# Copy custom nginx config
+# Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 
-# Copy built assets from builder
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Copy built assets from all builders
+COPY --from=shell-builder /app/shell/dist /usr/share/nginx/html/shell
+COPY --from=modeler-builder /app/modeler/dist /usr/share/nginx/html/modeler
+COPY --from=tasklist-builder /app/tasklist/dist /usr/share/nginx/html/tasklist
+COPY --from=monitor-builder /app/monitor/dist /usr/share/nginx/html/monitor
 
 # Add non-root user
 RUN adduser -D -u 1000 bpmn && \
@@ -38,12 +60,12 @@ RUN adduser -D -u 1000 bpmn && \
 # Switch to non-root user
 USER bpmn
 
-# Expose port
-EXPOSE 3000
+# Expose ports for each micro-frontend
+EXPOSE 3000 3001 3002 3003
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/shell/ || exit 1
 
 # Start nginx
 CMD ["nginx", "-g", "daemon off;"]

@@ -90,7 +90,7 @@ services:
       - bpmn-network
     restart: unless-stopped
 
-  # Web Frontend (React)
+  # Web Frontend (React Micro-frontends)
   web:
     build:
       context: ./web
@@ -101,11 +101,20 @@ services:
       REACT_APP_WS_URL: ws://localhost/ws
     ports:
       - "3000:3000"
+      - "3001:3001"
+      - "3002:3002"
+      - "3003:3003"
     depends_on:
       - engine
     networks:
       - bpmn-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/shell/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
 # =============================================================================
 # Networks
