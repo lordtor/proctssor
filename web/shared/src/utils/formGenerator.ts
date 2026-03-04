@@ -41,6 +41,122 @@ interface JSONSchema7 {
 }
 
 /**
+ * Service action with schema
+ */
+export interface ActionSchema {
+  input: JSONSchema7;
+  output: JSONSchema7;
+}
+
+/**
+ * Mapping parameter for BPMN element
+ */
+export interface MappingParameter {
+  name: string;
+  type: string;
+  required: boolean;
+  description?: string;
+  defaultValue?: any;
+  source?: string; // for output mapping
+  target?: string; // for input mapping
+}
+
+/**
+ * Generated mapping for a service action
+ */
+export interface ServiceMapping {
+  serviceName: string;
+  actionName: string;
+  inputParameters: MappingParameter[];
+  outputParameters: MappingParameter[];
+}
+
+/**
+ * Generate input/output parameters from JSON Schema
+ */
+export function generateMappingFromSchema(schema: JSONSchema7): MappingParameter[] {
+  if (!schema.properties) return [];
+
+  return Object.entries(schema.properties).map(([key, prop]: [string, any]) => ({
+    name: key,
+    type: prop.type || 'string',
+    required: schema.required?.includes(key) || false,
+    description: prop.description,
+    defaultValue: prop.default,
+  }));
+}
+
+/**
+ * Generate complete service mapping from action schema
+ */
+export function generateServiceMapping(
+  serviceName: string,
+  actionName: string,
+  actionSchema?: ActionSchema
+): ServiceMapping {
+  const inputParameters = actionSchema?.input 
+    ? generateMappingFromSchema(actionSchema.input)
+    : [];
+
+  const outputParameters = actionSchema?.output
+    ? generateMappingFromSchema(actionSchema.output)
+    : [];
+
+  return {
+    serviceName,
+    actionName,
+    inputParameters,
+    outputParameters,
+  };
+}
+
+/**
+ * Convert mapping to BPMN extension elements format
+ */
+export function mappingToBpmnExtension(mapping: ServiceMapping): Record<string, any> {
+  return {
+    serviceName: mapping.serviceName,
+    actionName: mapping.actionName,
+    inputParameters: mapping.inputParameters.map(p => ({
+      name: p.name,
+      type: p.type,
+      required: p.required,
+      defaultValue: p.defaultValue,
+      target: p.target,
+    })),
+    outputParameters: mapping.outputParameters.map(p => ({
+      name: p.name,
+      type: p.type,
+      source: p.source,
+    })),
+  };
+}
+
+/**
+ * Parse BPMN extension elements to mapping
+ */
+export function bpmnExtensionToMapping(extension: Record<string, any>): ServiceMapping | null {
+  if (!extension || !extension.serviceName) return null;
+
+  return {
+    serviceName: extension.serviceName,
+    actionName: extension.actionName || '',
+    inputParameters: (extension.inputParameters || []).map((p: any) => ({
+      name: p.name,
+      type: p.type,
+      required: p.required || false,
+      defaultValue: p.defaultValue,
+      target: p.target,
+    })),
+    outputParameters: (extension.outputParameters || []).map((p: any) => ({
+      name: p.name,
+      type: p.type,
+      source: p.source,
+    })),
+  };
+}
+
+/**
  * Generate form fields from JSON Schema
  */
 export function generateFormFields(schema: JSONSchema7, variables?: Record<string, any>): FormField[] {
@@ -181,4 +297,8 @@ export default {
   generateFormFields,
   validateFormData,
   formDataToVariables,
+  generateMappingFromSchema,
+  generateServiceMapping,
+  mappingToBpmnExtension,
+  bpmnExtensionToMapping,
 };

@@ -74,6 +74,21 @@ func (p *ProcessParser) ParseBytes(xmlData []byte) (*Process, error) {
 					Outgoing []string `xml:"outgoing"`
 					Incoming []string `xml:"incoming"`
 				} `xml:"manualTask"`
+				ReceiveTask *struct {
+					ID         string   `xml:"id,attr"`
+					Name       string   `xml:"name,attr,omitempty"`
+					MessageRef string   `xml:"messageRef,attr,omitempty"`
+					Outgoing   []string `xml:"outgoing"`
+					Incoming   []string `xml:"incoming"`
+				} `xml:"receiveTask"`
+				SendTask *struct {
+					ID             string   `xml:"id,attr"`
+					Name           string   `xml:"name,attr,omitempty"`
+					MessageRef     string   `xml:"messageRef,attr,omitempty"`
+					Implementation string   `xml:"implementation,attr,omitempty"`
+					Outgoing       []string `xml:"outgoing"`
+					Incoming       []string `xml:"incoming"`
+				} `xml:"sendTask"`
 				ExclusiveGateway *struct {
 					ID       string   `xml:"id,attr"`
 					Name     string   `xml:"name,attr,omitempty"`
@@ -106,6 +121,22 @@ func (p *ProcessParser) ParseBytes(xmlData []byte) (*Process, error) {
 					Outgoing []string `xml:"outgoing"`
 					Incoming []string `xml:"incoming"`
 				} `xml:"intermediateThrowEvent"`
+				BoundaryEvent *struct {
+					ID                   string   `xml:"id,attr"`
+					Name                 string   `xml:"name,attr,omitempty"`
+					CancelActivity       string   `xml:"cancelActivity,attr,omitempty"`
+					AttachedToRef        string   `xml:"attachedToRef,attr,omitempty"`
+					Outgoing             []string `xml:"outgoing"`
+					Incoming             []string `xml:"incoming"`
+					TimerEventDefinition *struct {
+						TimeDuration string `xml:"timeDuration"`
+						TimeDate     string `xml:"timeDate"`
+						TimeCycle    string `xml:"timeCycle"`
+					} `xml:"timerEventDefinition"`
+					ErrorEventDefinition *struct {
+						ErrorRef string `xml:"errorRef,attr,omitempty"`
+					} `xml:"errorEventDefinition"`
+				} `xml:"boundaryEvent"`
 			} `xml:"flowElement"`
 			SequenceFlow []struct {
 				ID                  string `xml:"id,attr"`
@@ -202,6 +233,31 @@ func (p *ProcessParser) ParseBytes(xmlData []byte) (*Process, error) {
 					Incoming: rawElem.ManualTask.Incoming,
 				},
 			})
+		} else if rawElem.ReceiveTask != nil {
+			process.FlowElement = append(process.FlowElement, &ReceiveTask{
+				Task: Task{
+					BaseElement: BaseElement{
+						ID:   rawElem.ReceiveTask.ID,
+						Name: rawElem.ReceiveTask.Name,
+					},
+					Outgoing: rawElem.ReceiveTask.Outgoing,
+					Incoming: rawElem.ReceiveTask.Incoming,
+				},
+				MessageRef: rawElem.ReceiveTask.MessageRef,
+			})
+		} else if rawElem.SendTask != nil {
+			process.FlowElement = append(process.FlowElement, &SendTask{
+				Task: Task{
+					BaseElement: BaseElement{
+						ID:   rawElem.SendTask.ID,
+						Name: rawElem.SendTask.Name,
+					},
+					Outgoing: rawElem.SendTask.Outgoing,
+					Incoming: rawElem.SendTask.Incoming,
+				},
+				MessageRef:     rawElem.SendTask.MessageRef,
+				Implementation: rawElem.SendTask.Implementation,
+			})
 		} else if rawElem.ExclusiveGateway != nil {
 			process.FlowElement = append(process.FlowElement, &ExclusiveGateway{
 				BaseElement: BaseElement{
@@ -249,6 +305,30 @@ func (p *ProcessParser) ParseBytes(xmlData []byte) (*Process, error) {
 				Outgoing: rawElem.IntermediateThrowEvent.Outgoing,
 				Incoming: rawElem.IntermediateThrowEvent.Incoming,
 			})
+		} else if rawElem.BoundaryEvent != nil {
+			be := &BoundaryEvent{
+				BaseElement: BaseElement{
+					ID:   rawElem.BoundaryEvent.ID,
+					Name: rawElem.BoundaryEvent.Name,
+				},
+				CancelActivity: rawElem.BoundaryEvent.CancelActivity,
+				AttachedToRef:  rawElem.BoundaryEvent.AttachedToRef,
+				Outgoing:       rawElem.BoundaryEvent.Outgoing,
+				Incoming:       rawElem.BoundaryEvent.Incoming,
+			}
+			if rawElem.BoundaryEvent.TimerEventDefinition != nil {
+				be.TimerEventDefinition = &TimerEventDefinition{
+					TimeDuration: rawElem.BoundaryEvent.TimerEventDefinition.TimeDuration,
+					TimeDate:     rawElem.BoundaryEvent.TimerEventDefinition.TimeDate,
+					TimeCycle:    rawElem.BoundaryEvent.TimerEventDefinition.TimeCycle,
+				}
+			}
+			if rawElem.BoundaryEvent.ErrorEventDefinition != nil {
+				be.ErrorEventDefinition = &ErrorEventDefinition{
+					ErrorRef: rawElem.BoundaryEvent.ErrorEventDefinition.ErrorRef,
+				}
+			}
+			process.FlowElement = append(process.FlowElement, be)
 		}
 	}
 
@@ -341,4 +421,43 @@ func GetIncomingFlows(process *Process, elementID string) []SequenceFlow {
 		}
 	}
 	return flows
+}
+
+// GetBoundaryEventsForActivity finds all boundary events attached to an activity
+func GetBoundaryEventsForActivity(process *Process, activityID string) []*BoundaryEvent {
+	var boundaryEvents []*BoundaryEvent
+	for _, elem := range process.FlowElement {
+		if be, ok := elem.(*BoundaryEvent); ok {
+			if be.AttachedToRef == activityID {
+				boundaryEvents = append(boundaryEvents, be)
+			}
+		}
+	}
+	return boundaryEvents
+}
+
+// GetTimerBoundaryEventsForActivity finds all timer boundary events attached to an activity
+func GetTimerBoundaryEventsForActivity(process *Process, activityID string) []*BoundaryEvent {
+	var timerBoundaryEvents []*BoundaryEvent
+	for _, elem := range process.FlowElement {
+		if be, ok := elem.(*BoundaryEvent); ok {
+			if be.AttachedToRef == activityID && be.TimerEventDefinition != nil {
+				timerBoundaryEvents = append(timerBoundaryEvents, be)
+			}
+		}
+	}
+	return timerBoundaryEvents
+}
+
+// GetErrorBoundaryEventsForActivity finds all error boundary events attached to an activity
+func GetErrorBoundaryEventsForActivity(process *Process, activityID string) []*BoundaryEvent {
+	var errorBoundaryEvents []*BoundaryEvent
+	for _, elem := range process.FlowElement {
+		if be, ok := elem.(*BoundaryEvent); ok {
+			if be.AttachedToRef == activityID && be.ErrorEventDefinition != nil {
+				errorBoundaryEvents = append(errorBoundaryEvents, be)
+			}
+		}
+	}
+	return errorBoundaryEvents
 }

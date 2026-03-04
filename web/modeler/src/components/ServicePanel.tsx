@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface ServiceAction {
   name: string;
   description?: string;
-  schema?: any;
+  schema?: {
+    input?: any;
+    output?: any;
+  };
 }
 
 interface ServiceInfo {
@@ -11,10 +14,26 @@ interface ServiceInfo {
   version: string;
 }
 
+interface MappingParameter {
+  name: string;
+  type: string;
+  required: boolean;
+  description?: string;
+  defaultValue?: any;
+  target?: string;
+  source?: string;
+}
+
+interface ServiceMapping {
+  serviceName: string;
+  actionName: string;
+  inputParameters: MappingParameter[];
+  outputParameters: MappingParameter[];
+}
+
 interface ServicePanelProps {
   services?: ServiceInfo[];
-  onActionSelect?: (action: ServiceAction & { serviceName: string }) => void;
-  onDrop?: (event: React.DragEvent, element: any) => void;
+  onActionSelect?: (action: ServiceAction & { serviceName: string; mapping?: ServiceMapping }) => void;
 }
 
 // Mock API for services (since we can't import from shared easily in this context)
@@ -39,10 +58,33 @@ const fetchServiceActions = async (serviceName: string): Promise<{ actions: Serv
     if (!response.ok) throw new Error('Failed to fetch actions');
     return response.json();
   } catch {
-    // Return mock actions
+    // Return mock actions with schemas
     const actionsMap: Record<string, ServiceAction[]> = {
       EmailService: [
-        { name: 'sendEmail', description: 'Send an email' },
+        { 
+          name: 'sendEmail', 
+          description: 'Send an email',
+          schema: {
+            input: {
+              type: 'object',
+              properties: {
+                to: { type: 'string', format: 'email', title: 'Recipient Email' },
+                subject: { type: 'string', title: 'Subject' },
+                body: { type: 'string', title: 'Body' },
+                attachments: { type: 'array', title: 'Attachments' },
+              },
+              required: ['to', 'subject']
+            },
+            output: {
+              type: 'object',
+              properties: {
+                messageId: { type: 'string', title: 'Message ID' },
+                sentAt: { type: 'string', format: 'date-time', title: 'Sent At' },
+                status: { type: 'string', title: 'Status' },
+              }
+            }
+          }
+        },
         { name: 'sendTemplate', description: 'Send email from template' },
       ],
       NotificationService: [
@@ -56,6 +98,44 @@ const fetchServiceActions = async (serviceName: string): Promise<{ actions: Serv
     };
     return { actions: actionsMap[serviceName] || [] };
   }
+};
+
+// Generate mapping from schema
+const generateMappingFromSchema = (serviceName: string, actionName: string, schema?: ServiceAction['schema']): ServiceMapping => {
+  const inputParameters: MappingParameter[] = [];
+  const outputParameters: MappingParameter[] = [];
+
+  if (schema?.input?.properties) {
+    for (const [key, prop] of Object.entries(schema.input.properties) as [string, any][]) {
+      inputParameters.push({
+        name: key,
+        type: prop.type || 'string',
+        required: schema.input.required?.includes(key) || false,
+        description: prop.description,
+        defaultValue: prop.default,
+        target: key, // default target is the same as name
+      });
+    }
+  }
+
+  if (schema?.output?.properties) {
+    for (const [key, prop] of Object.entries(schema.output.properties) as [string, any][]) {
+      outputParameters.push({
+        name: key,
+        type: prop.type || 'string',
+        required: false,
+        description: prop.description,
+        source: key, // default source is the same as name
+      });
+    }
+  }
+
+  return {
+    serviceName,
+    actionName,
+    inputParameters,
+    outputParameters,
+  };
 };
 
 const styles = {
@@ -143,7 +223,7 @@ const styles = {
   },
 };
 
-export default function ServicePanel({ services: propServices, onActionSelect, onDrop }: ServicePanelProps) {
+export default function ServicePanel({ services: propServices, onActionSelect }: ServicePanelProps) {
   const [services, setServices] = useState<ServiceInfo[]>(propServices || []);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [actions, setActions] = useState<Record<string, ServiceAction[]>>({});
@@ -174,16 +254,19 @@ export default function ServicePanel({ services: propServices, onActionSelect, o
   };
 
   const handleDragStart = (e: React.DragEvent, action: ServiceAction, serviceName: string) => {
+    const mapping = generateMappingFromSchema(serviceName, action.name, action.schema);
     const data = {
       ...action,
       serviceName,
+      mapping,
     };
     e.dataTransfer.setData('application/json', JSON.stringify(data));
     e.dataTransfer.effectAllowed = 'copy';
   };
 
   const handleActionClick = (action: ServiceAction, serviceName: string) => {
-    onActionSelect?.({ ...action, serviceName });
+    const mapping = generateMappingFromSchema(serviceName, action.name, action.schema);
+    onActionSelect?.({ ...action, serviceName, mapping });
   };
 
   if (loading) {

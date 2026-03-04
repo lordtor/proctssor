@@ -49,12 +49,12 @@ func NewConfig() *Config {
 	return &Config{
 		Port:        getEnv("PORT", defaultPort),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
-		NATSURL:     getEnv("NATS_URL", "nats://localhost:4222"),
-		DBHost:      getEnv("DB_HOST", "localhost"),
+		NATSURL:     getEnv("NATS_URL", "nats://nats:4222"),
+		DBHost:      getEnv("DB_HOST", "postgres"),
 		DBPort:      5432,
-		DBUser:      getEnv("DB_USER", "postgres"),
-		DBPassword:  getEnv("DB_PASSWORD", "postgres"),
-		DBName:      getEnv("DB_NAME", "workflow"),
+		DBUser:      getEnv("DB_USER", "bpmn"),
+		DBPassword:  getEnv("DB_PASSWORD", "bpmn_secret"),
+		DBName:      getEnv("DB_NAME", "bpmn"),
 		DBSSLMode:   getEnv("DB_SSLMODE", "disable"),
 	}
 }
@@ -136,12 +136,27 @@ func main() {
 	wsHub := websocket.NewHub()
 	go wsHub.Run()
 
-	// Initialize registry cache
-	registryCache := registry.NewCache()
-	registryCacheUpdater := registry.NewCacheUpdater(registryCache, registryRepo)
-	if err := registryCacheUpdater.Refresh(context.Background()); err != nil {
-		logger.Warn("Failed to refresh registry cache", zap.Error(err))
+	// Initialize registry cache with LRU (1000 entries, 5 min TTL)
+	registryCache := registry.NewLRUCache(1000, 5*time.Minute)
+	registryCacheWarmer := registry.NewCacheWarmer(registryCache, registryRepo)
+
+	// Warmup cache at startup
+	if err := registryCacheWarmer.Warmup(context.Background()); err != nil {
+		logger.Warn("Failed to warmup registry cache", zap.Error(err))
 	}
+
+	// Initialize registry change listener for PostgreSQL NOTIFY
+	registryListener := registry.NewRegistryChangeListener(registryCache)
+	// Note: In production, you would start the listener with the database connection
+	// Use pgx or lib/pq with proper notification handling
+	// if err := registryListener.Start(context.Background(), db.GetDB()); err != nil {
+	// 	logger.Warn("Failed to start registry change listener", zap.Error(err))
+	// }
+	defer registryListener.Stop()
+
+	logger.Info("Registry cache initialized",
+		zap.Int("maxEntries", 1000),
+		zap.String("ttl", "5m"))
 
 	// Initialize executor
 	exec := executor.NewExecutor(registryCache, natsPublisher, logger)

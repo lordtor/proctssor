@@ -4,6 +4,33 @@ import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-js.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn-embedded.css';
 import axios from 'axios';
+import ServicePanel from './components/ServicePanel';
+
+// Types for service mapping
+interface MappingParameter {
+  name: string;
+  type: string;
+  required: boolean;
+  description?: string;
+  defaultValue?: any;
+  target?: string;
+  source?: string;
+}
+
+interface ServiceMapping {
+  serviceName: string;
+  actionName: string;
+  inputParameters: MappingParameter[];
+  outputParameters: MappingParameter[];
+}
+
+interface ServiceActionData {
+  name: string;
+  description?: string;
+  schema?: any;
+  serviceName: string;
+  mapping?: ServiceMapping;
+}
 
 const styles = {
   container: {
@@ -45,6 +72,13 @@ const styles = {
   canvas: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  servicePanelWrapper: {
+    width: '280px',
+    backgroundColor: '#fff',
+    borderRight: '1px solid #e0e0e0',
+    display: 'flex',
+    flexDirection: 'column' as const,
   },
   panel: {
     width: '300px',
@@ -145,6 +179,98 @@ export default function Modeler() {
   const [processVersion, setProcessVersion] = useState('1.0.0');
   const [status, setStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({ type: null, message: '' });
   const [selectedElement, setSelectedElement] = useState<any>(null);
+  const [serviceMapping, setServiceMapping] = useState<ServiceMapping | null>(null);
+
+  // Handle service action selection from ServicePanel
+  const handleServiceActionSelect = useCallback((actionData: ServiceActionData) => {
+    if (actionData.mapping) {
+      setServiceMapping(actionData.mapping);
+      
+      // If an element is selected, apply the mapping to it
+      if (selectedElement && modelerRef.current) {
+        const modeling = modelerRef.current.get('modeling');
+        
+        // Update element with service mapping
+        modeling.updateProperties(selectedElement, {
+          name: actionData.serviceName + '.' + actionData.name,
+          serviceName: actionData.serviceName,
+          actionName: actionData.name,
+          inputParameters: JSON.stringify(actionData.mapping.inputParameters),
+          outputParameters: JSON.stringify(actionData.mapping.outputParameters),
+        });
+        
+        setStatus({ type: 'success', message: `Service ${actionData.serviceName}.${actionData.name} applied` });
+      }
+    }
+  }, [selectedElement]);
+
+  // Handle drop on canvas
+  const handleCanvasDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    
+    try {
+      const data = event.dataTransfer.getData('application/json');
+      if (!data) return;
+      
+      const actionData: ServiceActionData = JSON.parse(data);
+      
+      if (actionData.mapping && modelerRef.current) {
+        // Get the position from the drop event
+        const container = canvasRef.current?.getBoundingClientRect();
+        
+        if (container) {
+          // Create a new service task
+          const elementFactory = modelerRef.current.get('elementFactory');
+          const create = modelerRef.current.get('create');
+          const shape = elementFactory.createShape({
+            type: 'bpmn:ServiceTask',
+            name: actionData.serviceName + '.' + actionData.name,
+          });
+          
+          // Add service metadata to the shape
+          shape.businessObject.serviceName = actionData.serviceName;
+          shape.businessObject.actionName = actionData.name;
+          shape.businessObject.inputParameters = JSON.stringify(actionData.mapping?.inputParameters || []);
+          shape.businessObject.outputParameters = JSON.stringify(actionData.mapping?.outputParameters || []);
+          
+          create.start(event, shape);
+          
+          setServiceMapping(actionData.mapping || null);
+          setStatus({ type: 'success', message: `Added ${actionData.serviceName}.${actionData.name}` });
+        }
+      }
+    } catch (err) {
+      console.error('Drop failed:', err);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  // Load service mapping from selected element
+  useEffect(() => {
+    if (selectedElement?.businessObject) {
+      const bo = selectedElement.businessObject;
+      if (bo.serviceName && bo.actionName) {
+        try {
+          const inputParams = bo.inputParameters ? JSON.parse(bo.inputParameters) : [];
+          const outputParams = bo.outputParameters ? JSON.parse(bo.outputParameters) : [];
+          setServiceMapping({
+            serviceName: bo.serviceName,
+            actionName: bo.actionName,
+            inputParameters: inputParams,
+            outputParameters: outputParams,
+          });
+        } catch {
+          setServiceMapping(null);
+        }
+      } else {
+        setServiceMapping(null);
+      }
+    }
+  }, [selectedElement]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -264,7 +390,16 @@ export default function Modeler() {
       )}
 
       <div style={styles.canvasWrapper}>
-        <div ref={canvasRef} style={styles.canvas} />
+        <div style={styles.servicePanelWrapper}>
+          <ServicePanel onActionSelect={handleServiceActionSelect} />
+        </div>
+        
+        <div 
+          ref={canvasRef} 
+          style={styles.canvas}
+          onDrop={handleCanvasDrop}
+          onDragOver={handleDragOver}
+        />
         
         <div style={styles.panel}>
           <div style={styles.panelTitle}>Properties</div>
@@ -294,6 +429,57 @@ export default function Modeler() {
                 readOnly
                 style={styles.input}
               />
+              
+              {serviceMapping && (
+                <>
+                  <hr style={{ margin: '15px 0', border: 'none', borderTop: '1px solid #e0e0e0' }} />
+                  
+                  <div style={styles.panelTitle}>Service Mapping</div>
+                  
+                  <label style={styles.label}>Service</label>
+                  <input
+                    type="text"
+                    value={serviceMapping.serviceName}
+                    readOnly
+                    style={styles.input}
+                  />
+                  
+                  <label style={styles.label}>Action</label>
+                  <input
+                    type="text"
+                    value={serviceMapping.actionName}
+                    readOnly
+                    style={styles.input}
+                  />
+                  
+                  {serviceMapping.inputParameters.length > 0 && (
+                    <>
+                      <label style={{ ...styles.label, marginTop: '10px' }}>Input Parameters</label>
+                      {serviceMapping.inputParameters.map((param, idx) => (
+                        <div key={`input-${idx}`} style={{ marginBottom: '8px', padding: '8px', background: '#f5f5f5', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '12px', fontWeight: 500 }}>{param.name}</div>
+                          <div style={{ fontSize: '11px', color: '#666' }}>Type: {param.type} {param.required && '(required)'}</div>
+                          {param.defaultValue !== undefined && (
+                            <div style={{ fontSize: '11px', color: '#888' }}>Default: {String(param.defaultValue)}</div>
+                          )}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  
+                  {serviceMapping.outputParameters.length > 0 && (
+                    <>
+                      <label style={{ ...styles.label, marginTop: '10px' }}>Output Parameters</label>
+                      {serviceMapping.outputParameters.map((param, idx) => (
+                        <div key={`output-${idx}`} style={{ marginBottom: '8px', padding: '8px', background: '#f5f5f5', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '12px', fontWeight: 500 }}>{param.name}</div>
+                          <div style={{ fontSize: '11px', color: '#666' }}>Type: {param.type}</div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
             </>
           ) : (
             <p style={{ color: '#666', fontSize: '14px' }}>

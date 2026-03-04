@@ -1,0 +1,202 @@
+openapi: 3.0.3
+info:
+  title: Vault Service API
+  description: Secret management service for workflow automation
+  version: 1.0.0
+  contact:
+    name: BPMN Workflow Platform
+    url: https://github.com/bpmn-platform
+
+servers:
+  - url: http://localhost:8083
+    description: Local development server
+  - url: http://vault-service:8083
+    description: Production server
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns the health status of the service
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /ready:
+    get:
+      summary: Readiness check
+      description: Returns whether the service is ready to accept requests
+      operationId: readinessCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: not ready
+
+  /live:
+    get:
+      summary: Liveness check
+      description: Returns whether the service is alive
+      operationId: livenessCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: alive
+
+  /info:
+    get:
+      summary: Service information
+      description: Returns information about the service
+      operationId: serviceInfo
+      tags:
+        - Info
+      responses:
+        '200':
+          description: Service information
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+        service_name:
+          type: string
+          example: vault-service
+        timestamp:
+          type: string
+          format: date-time
+        uptime_seconds:
+          type: integer
+          example: 3600
+        checks:
+          type: object
+          additionalProperties:
+            type: boolean
+
+    SecretInput:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+          description: Secret key
+          example: database/password
+        value:
+          type: string
+          description: Secret value
+          example: my-secret-password
+        metadata:
+          type: object
+          description: Optional metadata
+          additionalProperties:
+            type: string
+
+    SecretOutput:
+      type: object
+      properties:
+        key:
+          type: string
+          example: database/password
+        value:
+          type: string
+          example: my-secret-password
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: integer
+          example: 1640000000
+        updated_at:
+          type: integer
+          example: 1640000000
+
+    SecretListItem:
+      type: object
+      properties:
+        key:
+          type: string
+          example: database/password
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: integer
+          example: 1640000000
+        updated_at:
+          type: integer
+          example: 1640000000
+
+    SecretListResponse:
+      type: object
+      properties:
+        secrets:
+          type: array
+          items:
+            $ref: '#/components/schemas/SecretListItem'
+        count:
+          type: integer
+          example: 10
+
+    OperationResponse:
+      type: object
+      properties:
+        key:
+          type: string
+          example: database/password
+        secret_set:
+          type: boolean
+          example: true
+        timestamp:
+          type: integer
+          example: 1640000000

@@ -1,0 +1,42 @@
+server:
+  host: "0.0.0.0"
+  port: 8082
+
+nats:
+  url: "nats://localhost:4222"
+  timeout: 30s
+  subscriber:
+    subject_prefix: "wf.cmd.service.notification-service"
+    queue_group: "notification-service"
+
+registry:
+  engine_url: "http://engine:8080"
+  heartbeat_interval: 30s
+  timeout: 10s
+
+service:
+  name: "notification-service"
+  type: "notification"
+  endpoint: "http://notification-service:8082"
+  metadata:
+    description: "Notification service for workflow automation"
+    version: "1.0.0"
+
+# Email configuration
+email:
+  smtp_host: "localhost"
+  smtp_port: 587
+  username: ""
+  password: ""
+  from_address: "noreply@example.com"
+  from_name: "Workflow Engine"
+
+# Slack configuration
+slack:
+  webhook_url: ""
+  default_channel: ""
+
+# Webhook configuration
+webhook:
+  timeout: 30s
+  retry_count: 3

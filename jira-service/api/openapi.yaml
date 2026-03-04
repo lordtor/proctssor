@@ -1,0 +1,293 @@
+openapi: 3.0.0
+info:
+  title: Jira Service API
+  description: |
+    Jira integration service for workflow automation platform.
+    Provides operations for creating and managing Jira issues.
+  version: 1.0.0
+  contact:
+    name: BPMN Workflow Platform
+    url: https://github.com/bpmn-platform
+
+servers:
+  - url: http://localhost:8084
+    description: Local development server
+  - url: http://jira-service:8084
+    description: Production server
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns the health status of the service
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /ready:
+    get:
+      summary: Readiness check
+      description: Returns whether the service is ready to accept requests
+      operationId: readinessCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: not ready
+
+  /live:
+    get:
+      summary: Liveness check
+      description: Returns whether the service is alive
+      operationId: livenessCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: alive
+
+  /info:
+    get:
+      summary: Service information
+      description: Returns information about the service
+      operationId: serviceInfo
+      tags:
+        - Info
+      responses:
+        '200':
+          description: Service information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  version:
+                    type: string
+                  description:
+                    type: string
+                  endpoints:
+                    type: array
+                    items:
+                      type: string
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        service_name:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        uptime_seconds:
+          type: integer
+        checks:
+          type: object
+          properties:
+            nats:
+              type: boolean
+            jira:
+              type: boolean
+
+    CreateIssueRequest:
+      type: object
+      required:
+        - project_key
+        - summary
+      properties:
+        project_key:
+          type: string
+          description: Jira project key (e.g., "PROJ")
+          example: "PROJ"
+        summary:
+          type: string
+          description: Issue summary/title
+          example: "Fix login bug"
+        description:
+          type: string
+          description: Issue description
+          example: "Users cannot login with OAuth"
+        issue_type:
+          type: string
+          description: Issue type (Task, Bug, Story, etc.)
+          default: Task
+          example: "Bug"
+        labels:
+          type: string
+          description: Comma-separated labels
+          example: "bug,high-priority"
+
+    CreateIssueResponse:
+      type: object
+      properties:
+        issue_key:
+          type: string
+          example: "PROJ-123"
+        issue_id:
+          type: string
+          example: "12345"
+        issue_url:
+          type: string
+          format: uri
+          example: "https://your-domain.atlassian.net/browse/PROJ-123"
+        issue_summary:
+          type: string
+        issue_type:
+          type: string
+        issue_status:
+          type: string
+
+    GetIssueResponse:
+      type: object
+      properties:
+        issue_key:
+          type: string
+        issue_id:
+          type: string
+        issue_url:
+          type: string
+        issue_summary:
+          type: string
+        issue_type:
+          type: string
+        issue_status:
+          type: string
+        issue_desc:
+          type: string
+        assignee:
+          type: string
+        reporter:
+          type: string
+        created:
+          type: string
+        updated:
+          type: string
+
+    UpdateIssueRequest:
+      type: object
+      properties:
+        summary:
+          type: string
+          description: New summary
+        description:
+          type: string
+          description: New description
+        labels:
+          type: string
+          description: New comma-separated labels
+
+    TransitionIssueRequest:
+      type: object
+      properties:
+        issue_key:
+          type: string
+          description: Issue key to transition
+          example: "PROJ-123"
+        transition_id:
+          type: string
+          description: Transition ID
+        transition_name:
+          type: string
+          description: Transition name (e.g., "Done", "In Progress")
+          example: "Done"
+
+    SearchIssuesRequest:
+      type: object
+      required:
+        - jql
+      properties:
+        jql:
+          type: string
+          description: JQL query
+          example: "project = PROJ AND status = Open"
+        max_results:
+          type: integer
+          default: 50
+          description: Maximum number of results
+
+    AddCommentRequest:
+      type: object
+      required:
+        - issue_key
+        - body
+      properties:
+        issue_key:
+          type: string
+          example: "PROJ-123"
+        body:
+          type: string
+          description: Comment body
+          example: "This issue is being worked on"
+
+    AssignIssueRequest:
+      type: object
+      required:
+        - issue_key
+        - assignee
+      properties:
+        issue_key:
+          type: string
+          example: "PROJ-123"
+        assignee:
+          type: string
+          description: Username to assign
+          example: "john.doe"
+
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+      description: Jira API token authentication
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Issues
+    description: Jira issue operations
+  - name: Info
+    description: Service information

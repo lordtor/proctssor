@@ -1,14 +1,23 @@
 -- BPMN Workflow Platform - Cron Jobs
 -- Part 4: Scheduled Background Jobs
--- NOTE: pg_cron extension is not installed in the base PostgreSQL image
--- These jobs should be implemented at the application level or via external scheduler
+-- Uses pg_cron extension for scheduled tasks
+
+-- Enable pg_cron extension
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- Grant necessary permissions for pg_cron
+GRANT USAGE ON SCHEMA cron TO bpmn;
 
 -- =============================================================================
--- Job 1: Cleanup Dead Services
+-- Job 1: Cleanup Dead Services (every 1 minute)
 -- =============================================================================
 -- Remove services that haven't sent heartbeat for more than 2 minutes
--- Implementation: Run via application scheduler every 2 minutes
-/*
+-- Schedule: every 1 minute
+
+SELECT cron.schedule(
+    'cleanup_dead_services',
+    '* * * * *',
+    $$
     UPDATE service_registry
     SET service_status = 'unresponsive'
     WHERE service_status NOT IN ('unhealthy', 'deregistered')
@@ -23,13 +32,19 @@
     SET service_status = 'deregistered'
     WHERE service_status = 'unhealthy'
       AND last_heartbeat < NOW() - INTERVAL '10 minutes';
-*/
+    $$
+);
 
 -- =============================================================================
--- Job 2: Timeout Stuck Instances
+-- Job 2: Timeout Stuck Instances (every 5 minutes)
 -- =============================================================================
 -- Mark instances as error if stuck for more than 1 hour
-/*
+-- Schedule: every 5 minutes
+
+SELECT cron.schedule(
+    'timeout_stuck_instances',
+    '*/5 * * * *',
+    $$
     UPDATE process_instances
     SET status = 'error',
         error_message = 'Process timeout - no activity for 1 hour',
@@ -37,13 +52,19 @@
     WHERE status = 'active'
       AND updated_at < NOW() - INTERVAL '1 hour'
       AND retry_count >= max_retries;
-*/
+    $$
+);
 
 -- =============================================================================
--- Job 3: Resume Suspended Instances
+-- Job 3: Resume Suspended Instances (every 5 minutes)
 -- =============================================================================
 -- Resume instances when suspension time expires
-/*
+-- Schedule: every 5 minutes
+
+SELECT cron.schedule(
+    'resume_suspended_instances',
+    '*/5 * * * *',
+    $$
     UPDATE process_instances
     SET status = 'active',
         suspended_until = NULL,
@@ -51,33 +72,47 @@
     WHERE status = 'suspended'
       AND suspended_until IS NOT NULL
       AND suspended_until <= NOW();
-*/
+    $$
+);
 
 -- =============================================================================
--- Job 4: Process Timer Jobs
+-- Job 4: Process Timer Jobs (every minute)
 -- =============================================================================
 -- Execute pending timers that are due
-/*
+-- Schedule: every minute
+
+SELECT cron.schedule(
+    'process_due_timer_jobs',
+    '* * * * *',
+  $$
     UPDATE timer_jobs
     SET status = 'running',
         attempt_count = attempt_count + 1,
-        last_executed_at = CURRENT_TIMESTAMP
+        last_executed_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
     WHERE status = 'pending'
       AND due_date <= NOW();
-*/
+  $$
+);
 
 -- =============================================================================
--- Job 5: Cleanup Expired Tokens
+-- Job 5: Cleanup Expired Tokens (every hour)
 -- =============================================================================
 -- Mark expired tokens as expired
-/*
+-- Schedule: every hour
+
+SELECT cron.schedule(
+    'cleanup_expired_tokens',
+    '0 * * * *',
+  $$
     UPDATE process_tokens
     SET status = 'expired',
         updated_at = CURRENT_TIMESTAMP
     WHERE status = 'waiting'
       AND expires_at IS NOT NULL
       AND expires_at <= NOW();
-*/
+  $$
+);
 
 -- =============================================================================
 -- Job 6: Auto-complete Timed-out Tasks
@@ -248,7 +283,19 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Grant execute permissions
-GRANT EXECUTE ON FUNCTION process_due_timer_jobs() TO workflow_user;
-GRANT EXECUTE ON FUNCTION complete_timer_job(UUID, VARCHAR) TO workflow_user;
-GRANT EXECUTE ON FUNCTION schedule_timer_job(UUID, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, INTERVAL, INTEGER) TO workflow_user;
-GRANT EXECUTE ON FUNCTION cancel_timer_job(UUID) TO workflow_user;
+GRANT EXECUTE ON FUNCTION process_due_timer_jobs() TO bpmn;
+GRANT EXECUTE ON FUNCTION complete_timer_job(UUID, VARCHAR) TO bpmn;
+GRANT EXECUTE ON FUNCTION schedule_timer_job(UUID, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP WITH TIME ZONE, INTERVAL, INTEGER) TO bpmn;
+GRANT EXECUTE ON FUNCTION cancel_timer_job(UUID) TO bpmn;
+
+-- Grant execute permissions for cleanup functions
+GRANT EXECUTE ON FUNCTION run_cleanup_dead_services() TO bpmn;
+GRANT EXECUTE ON FUNCTION run_timeout_stuck_instances() TO bpmn;
+GRANT EXECUTE ON FUNCTION run_resume_suspended_instances() TO bpmn;
+
+-- Grant permissions on cron tables
+GRANT ALL ON TABLE cron.job TO bpmn;
+GRANT ALL ON TABLE cron.job_run_details TO bpmn;
+
+-- Verify scheduled jobs
+SELECT * FROM cron.job ORDER BY jobname;

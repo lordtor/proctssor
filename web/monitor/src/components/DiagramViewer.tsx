@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import BpmnViewer from 'bpmn-js/lib/Viewer';
 import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-js.css';
@@ -9,6 +9,7 @@ import { Token } from '../store';
 interface DiagramViewerProps {
   processDefinitionId: string;
   tokens: Token[];
+  onSubProcessClick?: (processDefinitionId: string, elementId: string) => void;
 }
 
 const styles = {
@@ -77,7 +78,7 @@ const defaultDiagram = `<?xml version="1.0" encoding="UTF-8"?>
   </bpmndi:BPMNDiagram>
 </bpmn:definitions>`;
 
-export default function DiagramViewer({ processDefinitionId, tokens }: DiagramViewerProps) {
+export default function DiagramViewer({ processDefinitionId, tokens, onSubProcessClick }: DiagramViewerProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
 
@@ -106,6 +107,42 @@ export default function DiagramViewer({ processDefinitionId, tokens }: DiagramVi
 
     viewer.importXML(bpmnXml).catch(console.error);
     viewerRef.current = viewer;
+
+    // Add click handler for sub-processes
+    if (onSubProcessClick) {
+      const eventBus = viewer.get('eventBus');
+      
+      eventBus.on('element.click', (element: any) => {
+        if (!element) return;
+        
+        // Check if element is a sub-process or call activity
+        const type = element.type;
+        const businessObject = element.businessObject;
+        
+        // BPMN element types for sub-processes
+        const subProcessTypes = [
+          'bpmn:SubProcess',
+          'bpmn:CallActivity',
+          'bpmn:AdHocSubProcess',
+          'bpmn:Transaction',
+        ];
+        
+        // Check direct type or via businessObject
+        const isSubProcess = subProcessTypes.includes(type) || 
+          subProcessTypes.includes(businessObject?.$type);
+        
+        // Get calledElement for CallActivity
+        const calledElement = businessObject?.calledElement;
+        
+        if (isSubProcess && calledElement) {
+          onSubProcessClick(calledElement, element.id);
+        } else if (isSubProcess && !calledElement) {
+          // Embedded sub-process - try to get the process reference
+          // For now, we'll log it - in real implementation would parse the di
+          console.log('Embedded sub-process clicked:', element.id);
+        }
+      });
+    }
 
     return () => {
       viewer.destroy();

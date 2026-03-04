@@ -26,15 +26,23 @@ type Graph struct {
 
 	// Tasks holds all tasks (user, service, script, manual)
 	Tasks map[FlowElementType][]FlowElement `json:"tasks"`
+
+	// BoundaryEvents holds all boundary events
+	BoundaryEvents []*BoundaryEvent `json:"boundary_events"`
+
+	// BoundaryEventsByActivity maps activity ID to its boundary events
+	BoundaryEventsByActivity map[string][]*BoundaryEvent `json:"boundary_events_by_activity"`
 }
 
 // NewGraph creates a new Graph
 func NewGraph() *Graph {
 	return &Graph{
-		Nodes:    make(map[string]FlowElement),
-		Edges:    make(map[string][]FlowElement),
-		Gateways: make(map[FlowElementType][]FlowElement),
-		Tasks:    make(map[FlowElementType][]FlowElement),
+		Nodes:                    make(map[string]FlowElement),
+		Edges:                    make(map[string][]FlowElement),
+		Gateways:                 make(map[FlowElementType][]FlowElement),
+		Tasks:                    make(map[FlowElementType][]FlowElement),
+		BoundaryEvents:           make([]*BoundaryEvent, 0),
+		BoundaryEventsByActivity: make(map[string][]*BoundaryEvent),
 	}
 }
 
@@ -72,6 +80,14 @@ func BuildGraph(process *Process) (*Graph, error) {
 			FlowElementTypeReceiveTask,
 			FlowElementTypeSendTask:
 			graph.Tasks[elem.GetElementType()] = append(graph.Tasks[elem.GetElementType()], elem)
+		case FlowElementTypeBoundaryEvent,
+			FlowElementTypeTimerBoundaryEvent,
+			FlowElementTypeErrorBoundaryEvent:
+			be := elem.(*BoundaryEvent)
+			graph.BoundaryEvents = append(graph.BoundaryEvents, be)
+			if be.AttachedToRef != "" {
+				graph.BoundaryEventsByActivity[be.AttachedToRef] = append(graph.BoundaryEventsByActivity[be.AttachedToRef], be)
+			}
 		}
 	}
 
@@ -261,4 +277,46 @@ func (g *Graph) GetTasks() []FlowElement {
 		result = append(result, tasks...)
 	}
 	return result
+}
+
+// GetBoundaryEvents returns all boundary events in the graph
+func (g *Graph) GetBoundaryEvents() []*BoundaryEvent {
+	return g.BoundaryEvents
+}
+
+// GetBoundaryEventsForActivity returns all boundary events attached to an activity
+func (g *Graph) GetBoundaryEventsForActivity(activityID string) []*BoundaryEvent {
+	return g.BoundaryEventsByActivity[activityID]
+}
+
+// GetTimerBoundaryEventsForActivity returns all timer boundary events attached to an activity
+func (g *Graph) GetTimerBoundaryEventsForActivity(activityID string) []*BoundaryEvent {
+	var result []*BoundaryEvent
+	for _, be := range g.BoundaryEventsByActivity[activityID] {
+		if be.TimerEventDefinition != nil {
+			result = append(result, be)
+		}
+	}
+	return result
+}
+
+// GetErrorBoundaryEventsForActivity returns all error boundary events attached to an activity
+func (g *Graph) GetErrorBoundaryEventsForActivity(activityID string) []*BoundaryEvent {
+	var result []*BoundaryEvent
+	for _, be := range g.BoundaryEventsByActivity[activityID] {
+		if be.ErrorEventDefinition != nil {
+			result = append(result, be)
+		}
+	}
+	return result
+}
+
+// HasInterruptingBoundaryEvent checks if an activity has an interrupting boundary event
+func (g *Graph) HasInterruptingBoundaryEvent(activityID string) bool {
+	for _, be := range g.BoundaryEventsByActivity[activityID] {
+		if be.IsInterrupting() {
+			return true
+		}
+	}
+	return false
 }

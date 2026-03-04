@@ -138,10 +138,10 @@ export const api = {
       axiosInstance.get(`/instances/${instanceId}/tasks/${taskId}/form`).then(r => r.data),
     
     complete: (instanceId: string, taskId: string, data: any): Promise<void> => 
-      axiosInstance.post(`/instances/${instanceId}/tasks/${taskId}/complete`, { data }).then(() => {}),
+      axiosInstance.post(`/instances/${instanceId}/tasks/${taskId}/complete`, { variables: data }).then(() => {}),
     
-    claim: (taskId: string): Promise<void> => 
-      axiosInstance.post(`/tasks/${taskId}/claim`).then(() => {}),
+    claim: (taskId: string, userId?: string): Promise<void> => 
+      axiosInstance.post(`/tasks/${taskId}/claim`, { user_id: userId || 'current_user' }).then(() => {}),
     
     unclaim: (taskId: string): Promise<void> => 
       axiosInstance.post(`/tasks/${taskId}/unclaim`).then(() => {}),

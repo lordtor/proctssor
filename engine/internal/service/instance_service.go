@@ -457,3 +457,33 @@ func (s *InstanceService) GetTaskForm(ctx context.Context, instanceID, taskID st
 func (s *InstanceService) GetTasks(ctx context.Context, filter postgres.TaskFilter) ([]postgres.UserTask, error) {
 	return s.instanceRepo.GetTasks(ctx, filter)
 }
+
+// ClaimTask assigns a task to a user
+func (s *InstanceService) ClaimTask(ctx context.Context, taskID, userID string) error {
+	return s.instanceRepo.ClaimTask(ctx, taskID, userID)
+}
+
+// UnclaimTask removes assignment from a task
+func (s *InstanceService) UnclaimTask(ctx context.Context, taskID string) error {
+	return s.instanceRepo.UnclaimTask(ctx, taskID)
+}
+
+// DelegateTask delegates a task to another user
+func (s *InstanceService) DelegateTask(ctx context.Context, taskID, userID string) error {
+	return s.instanceRepo.DelegateTask(ctx, taskID, userID)
+}
+
+// GetTaskHistory returns completed tasks
+func (s *InstanceService) GetTaskHistory(ctx context.Context, limit int) ([]postgres.UserTask, error) {
+	return s.instanceRepo.GetTaskHistory(ctx, limit)
+}
+
+// GetTokens returns tokens for an instance
+func (s *InstanceService) GetTokens(ctx context.Context, instanceID string) ([]map[string]interface{}, error) {
+	return s.instanceRepo.GetTokens(ctx, instanceID)
+}
+
+// GetEvents returns events for an instance
+func (s *InstanceService) GetEvents(ctx context.Context, instanceID string) ([]map[string]interface{}, error) {
+	return s.eventRepo.GetEvents(ctx, instanceID)
+}

@@ -67,6 +67,9 @@ func (v *Validator) validate(process *Process) {
 
 	// Validate tasks
 	v.validateTasks(process)
+
+	// Validate boundary events
+	v.validateBoundaryEvents(process)
 }
 
 func (v *Validator) validateEvents(process *Process) {
@@ -249,6 +252,10 @@ func (v *Validator) validateTasks(process *Process) {
 			v.validateServiceTask(task)
 		case *ScriptTask:
 			v.validateScriptTask(task)
+		case *ReceiveTask:
+			v.validateReceiveTask(task)
+		case *SendTask:
+			v.validateSendTask(task)
 		}
 	}
 }
@@ -297,6 +304,106 @@ func (v *Validator) validateScriptTask(task *ScriptTask) {
 	}
 }
 
+func (v *Validator) validateBoundaryEvents(process *Process) {
+	// Collect all valid attachedToRef targets (activities that can have boundary events)
+	validTargets := make(map[string]bool)
+	for _, elem := range process.FlowElement {
+		if elem == nil {
+			continue
+		}
+		switch elem.GetElementType() {
+		case FlowElementTypeUserTask,
+			FlowElementTypeServiceTask,
+			FlowElementTypeScriptTask,
+			FlowElementTypeManualTask,
+			FlowElementTypeReceiveTask,
+			FlowElementTypeSubProcess:
+			validTargets[elem.GetID()] = true
+		}
+	}
+
+	// Validate each boundary event
+	for _, elem := range process.FlowElement {
+		if elem == nil {
+			continue
+		}
+
+		be, ok := elem.(*BoundaryEvent)
+		if !ok {
+			continue
+		}
+
+		// Boundary event must have attachedToRef
+		if be.AttachedToRef == "" {
+			v.addError(be.ID, be.Name, "Boundary event must have attachedToRef")
+		} else if !validTargets[be.AttachedToRef] {
+			v.addError(be.ID, be.Name, fmt.Sprintf("Boundary event attached to invalid element '%s' (must be a task or subprocess)", be.AttachedToRef))
+		}
+
+		// Boundary event must have timer or error definition
+		hasTimer := be.TimerEventDefinition != nil
+		hasError := be.ErrorEventDefinition != nil
+
+		if !hasTimer && !hasError {
+			v.addError(be.ID, be.Name, "Boundary event must have a timer or error event definition")
+		}
+
+		// Timer boundary event must have time duration/date/cycle
+		if hasTimer {
+			if be.TimerEventDefinition.TimeDuration == "" &&
+				be.TimerEventDefinition.TimeDate == "" &&
+				be.TimerEventDefinition.TimeCycle == "" {
+				v.addError(be.ID, be.Name, "Timer boundary event must have timeDuration, timeDate, or timeCycle")
+			}
+		}
+
+		// Error boundary event should have errorRef
+		if hasError && be.ErrorEventDefinition.ErrorRef == "" {
+			v.addWarning(be.ID, be.Name, "Error boundary event should have an errorRef")
+		}
+
+		// Boundary event must have outgoing flow (to handle the event)
+		if len(be.Outgoing) == 0 {
+			v.addError(be.ID, be.Name, "Boundary event must have at least one outgoing sequence flow")
+		}
+
+		// Non-interrupting boundary events should not have incoming flows
+		if len(be.Incoming) > 0 && !be.IsInterrupting() {
+			v.addWarning(be.ID, be.Name, "Non-interrupting boundary event should typically not have incoming flows")
+		}
+	}
+
+	// Check for multiple interrupting boundary events of the same type
+	interruptingTimers := make(map[string]int)
+	interruptingErrors := make(map[string]int)
+
+	for _, elem := range process.FlowElement {
+		be, ok := elem.(*BoundaryEvent)
+		if !ok || !be.IsInterrupting() {
+			continue
+		}
+
+		if be.TimerEventDefinition != nil {
+			interruptingTimers[be.AttachedToRef]++
+		}
+		if be.ErrorEventDefinition != nil {
+			interruptingErrors[be.AttachedToRef]++
+		}
+	}
+
+	for targetID, count := range interruptingTimers {
+		if count > 1 {
+			v.addWarning("", "", fmt.Sprintf("Activity '%s' has %d interrupting timer boundary events (only one will execute)", targetID, count))
+		}
+	}
+
+	for targetID, count := range interruptingErrors {
+		if count > 1 {
+			v.addWarning("", "", fmt.Sprintf("Activity '%s' has %d interrupting error boundary events", targetID, count))
+		}
+	}
+}
+
 func (v *Validator) addError(id, name, message string) {
 	v.errors = append(v.errors, ValidationError{
 		ElementID:   id,
@@ -313,4 +420,101 @@ func (v *Validator) addWarning(id, name, message string) {
 		Message:     message,
 		Severity:    "warning",
 	})
+}
+
+func (v *Validator) validateReceiveTask(task *ReceiveTask) {
+	if len(task.Outgoing) == 0 {
+		v.addError(task.ID, task.Name, "Receive task must have at least one outgoing sequence flow")
+	}
+	if len(task.Incoming) == 0 {
+		v.addError(task.ID, task.Name, "Receive task must have at least one incoming sequence flow")
+	}
+	// ReceiveTask should have a messageRef for message correlation
+	if task.MessageRef == "" {
+		v.addWarning(task.ID, task.Name, "Receive task should have a messageRef for message correlation")
+	}
+}
+
+func (v *Validator) validateSendTask(task *SendTask) {
+	if len(task.Outgoing) == 0 {
+		v.addError(task.ID, task.Name, "Send task must have at least one outgoing sequence flow")
+	}
+	if len(task.Incoming) == 0 {
+		v.addError(task.ID, task.Name, "Send task must have at least one incoming sequence flow")
+	}
+	// SendTask should have a messageRef to identify the message
+	if task.MessageRef == "" {
+		v.addWarning(task.ID, task.Name, "Send task should have a messageRef to identify the message")
+	}
+}
+
+// ValidateMessageFlow validates the message flows in a collaboration
+func (v *Validator) ValidateMessageFlow(collaboration *Collaboration, processes []Process) {
+	if collaboration == nil {
+		return
+	}
+
+	// Build a map of all participants and their process elements
+	participantElements := make(map[string]map[string]bool)
+	for _, p := range collaboration.Participant {
+		participantElements[p.ID] = make(map[string]bool)
+		// Find the process for this participant
+		for _, proc := range processes {
+			if proc.ID == p.ProcessRef {
+				for _, elem := range proc.FlowElement {
+					if elem != nil {
+						participantElements[p.ID][elem.GetID()] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Validate each message flow
+	for _, mf := range collaboration.MessageFlow {
+		// Check source and target exist
+		if mf.SourceRef == "" {
+			v.addError(mf.ID, mf.Name, "Message flow must have a sourceRef")
+		}
+		if mf.TargetRef == "" {
+			v.addError(mf.ID, mf.Name, "Message flow must have a targetRef")
+		}
+
+		// Check source is a SendTask or ThrowEvent
+		// Check target is a ReceiveTask or CatchEvent
+		// This is a simplified check - in a full implementation, you'd verify the element types
+
+		// Check source and target are different
+		if mf.SourceRef == mf.TargetRef && mf.SourceRef != "" {
+			v.addError(mf.ID, mf.Name, "Message flow cannot connect an element to itself")
+		}
+
+		// Check that source and target belong to different participants
+		sourceParticipant := v.findParticipantForElement(collaboration, mf.SourceRef, processes)
+		targetParticipant := v.findParticipantForElement(collaboration, mf.TargetRef, processes)
+
+		if sourceParticipant != "" && targetParticipant != "" && sourceParticipant == targetParticipant {
+			v.addWarning(mf.ID, mf.Name, fmt.Sprintf("Message flow connects elements within the same participant '%s' (should connect different pools)", sourceParticipant))
+		}
+	}
+}
+
+// findParticipantForElement finds which participant contains a given element
+func (v *Validator) findParticipantForElement(collaboration *Collaboration, elementID string, processes []Process) string {
+	if collaboration == nil {
+		return ""
+	}
+
+	for _, p := range collaboration.Participant {
+		for _, proc := range processes {
+			if proc.ID == p.ProcessRef {
+				for _, elem := range proc.FlowElement {
+					if elem != nil && elem.GetID() == elementID {
+						return p.ID
+					}
+				}
+			}
+		}
+	}
+	return ""
 }

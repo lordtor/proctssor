@@ -266,6 +266,7 @@ type UserTask struct {
 	ProcessDefID string                 `json:"process_definition_id"`
 	Assignee     string                 `json:"assignee"`
 	CreatedAt    time.Time              `json:"created_at"`
+	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
 	DueDate      *time.Time             `json:"due_date"`
 	Variables    map[string]interface{} `json:"variables"`
 }
@@ -559,6 +560,140 @@ func (r *PostgresInstanceRepository) GetTasks(ctx context.Context, filter TaskFi
 	return tasks, nil
 }
 
+// DelegateTask delegates a task to another user
+func (r *PostgresInstanceRepository) DelegateTask(ctx context.Context, taskID, userID string) error {
+	query := `
+		UPDATE user_tasks
+		SET assignee = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+
+	_, err := r.db.GetDB().ExecContext(ctx, query, userID, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to delegate task: %w", err)
+	}
+
+	return nil
+}
+
+// GetTaskHistory returns completed tasks
+func (r *PostgresInstanceRepository) GetTaskHistory(ctx context.Context, limit int) ([]UserTask, error) {
+	query := `
+		SELECT ut.id, ut.name, ut.instance_id, ut.process_definition_id, ut.assignee, ut.created_at, ut.completed_at, ut.due_date, ut.variables
+		FROM user_tasks ut
+		WHERE ut.completed_at IS NOT NULL
+		ORDER BY ut.completed_at DESC
+		LIMIT $1
+	`
+
+	rows, err := r.db.GetDB().QueryContext(ctx, query, limit)
+	if err != nil {
+		log.Printf("GetTaskHistory query error: %v", err)
+		return nil, fmt.Errorf("failed to fetch task history: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []UserTask
+	for rows.Next() {
+		var task UserTask
+		var dueDate, completedAt sql.NullTime
+		var variablesJSON []byte
+
+		err := rows.Scan(&task.ID, &task.Name, &task.InstanceID, &task.ProcessDefID, &task.Assignee, &task.CreatedAt, &completedAt, &dueDate, &variablesJSON)
+		if err != nil {
+			log.Printf("GetTaskHistory scan error: %v", err)
+			continue
+		}
+
+		if dueDate.Valid {
+			task.DueDate = &dueDate.Time
+		}
+		if completedAt.Valid {
+			task.CompletedAt = &completedAt.Time
+		}
+		if err := json.Unmarshal(variablesJSON, &task.Variables); err != nil {
+			log.Printf("GetTaskHistory unmarshal variables error for task %s: %v", task.ID, err)
+			task.Variables = make(map[string]interface{})
+		}
+
+		tasks = append(tasks, task)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("GetTaskHistory rows error: %v", err)
+	}
+
+	return tasks, nil
+}
+
+// ClaimTask assigns a task to a user
+func (r *PostgresInstanceRepository) ClaimTask(ctx context.Context, taskID, userID string) error {
+	query := `
+		UPDATE user_tasks 
+		SET assignee = $1, status = 'claimed', updated_at = NOW()
+		WHERE id = $2
+	`
+	_, err := r.db.GetDB().ExecContext(ctx, query, userID, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to claim task: %w", err)
+	}
+	return nil
+}
+
+// UnclaimTask removes assignment from a task
+func (r *PostgresInstanceRepository) UnclaimTask(ctx context.Context, taskID string) error {
+	query := `
+		UPDATE user_tasks 
+		SET assignee = NULL, status = 'pending', updated_at = NOW()
+		WHERE id = $1
+	`
+	_, err := r.db.GetDB().ExecContext(ctx, query, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to unclaim task: %w", err)
+	}
+	return nil
+}
+
+// GetTokens returns tokens for an instance
+func (r *PostgresInstanceRepository) GetTokens(ctx context.Context, instanceID string) ([]map[string]interface{}, error) {
+	query := `
+		SELECT id, node_id, node_name, token_key, token_value, status, created_at
+		FROM process_tokens 
+		WHERE instance_id = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := r.db.GetDB().QueryContext(ctx, query, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch tokens: %w", err)
+	}
+	defer rows.Close()
+
+	var tokens []map[string]interface{}
+	for rows.Next() {
+		var id, nodeID, nodeName, tokenKey, tokenValue, status string
+		var createdAt time.Time
+
+		err := rows.Scan(&id, &nodeID, &nodeName, &tokenKey, &tokenValue, &status, &createdAt)
+		if err != nil {
+			log.Printf("GetTokens scan error: %v", err)
+			continue
+		}
+
+		tokens = append(tokens, map[string]interface{}{
+			"id":          id,
+			"node_id":     nodeID,
+			"node_name":   nodeName,
+			"token_key":   tokenKey,
+			"token_value": tokenValue,
+			"status":      status,
+			"created_at":  createdAt,
+		})
+	}
+
+	return tokens, nil
+}
+
 // EventRepository handles process event persistence
 type EventRepository interface {
 	AppendEvent(ctx context.Context, event *ProcessEvent) error
@@ -567,13 +702,15 @@ type EventRepository interface {
 
 // ProcessEvent represents a process event
 type ProcessEvent struct {
-	ID         string          `json:"id"`
-	InstanceID string          `json:"instance_id"`
-	TokenID    string          `json:"token_id,omitempty"`
-	ElementID  string          `json:"element_id,omitempty"`
-	Type       string          `json:"type"` // started, completed, entered, exited, error
-	Variables  json.RawMessage `json:"variables,omitempty"`
-	Timestamp  time.Time       `json:"timestamp"`
+	ID                  string          `json:"id"`
+	InstanceID          string          `json:"instance_id"`
+	ProcessDefinitionID int             `json:"process_definition_id"`
+	NodeID              string          `json:"node_id,omitempty"`
+	NodeName            string          `json:"node_name,omitempty"`
+	NodeType            string          `json:"node_type,omitempty"`
+	Action              string          `json:"action"`
+	Payload             json.RawMessage `json:"payload,omitempty"`
+	OccurredAt          time.Time       `json:"occurred_at"`
 }
 
 // PostgresEventRepository implements EventRepository
@@ -591,23 +728,27 @@ func (r *PostgresEventRepository) AppendEvent(ctx context.Context, event *Proces
 	if event.ID == "" {
 		event.ID = uuid.New().String()
 	}
-	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now()
+	if event.OccurredAt.IsZero() {
+		event.OccurredAt = time.Now()
 	}
 
+	payload, _ := json.Marshal(event.Payload)
+
 	query := `
-		INSERT INTO process_events (id, instance_id, token_id, element_id, type, variables, timestamp)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO process_events (id, instance_id, process_definition_id, node_id, node_name, node_type, action, payload, occurred_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 
 	_, err := r.db.GetDB().ExecContext(ctx, query,
 		event.ID,
 		event.InstanceID,
-		event.TokenID,
-		event.ElementID,
-		event.Type,
-		event.Variables,
-		event.Timestamp,
+		event.ProcessDefinitionID,
+		event.NodeID,
+		event.NodeName,
+		event.NodeType,
+		event.Action,
+		payload,
+		event.OccurredAt,
 	)
 
 	if err != nil {
@@ -620,10 +761,10 @@ func (r *PostgresEventRepository) AppendEvent(ctx context.Context, event *Proces
 // ListByInstance lists events for an instance
 func (r *PostgresEventRepository) ListByInstance(ctx context.Context, instanceID string) ([]ProcessEvent, error) {
 	query := `
-		SELECT id, instance_id, token_id, element_id, type, variables, timestamp
+		SELECT id, instance_id, node_id, node_name, node_type, action, payload, occurred_at
 		FROM process_events 
 		WHERE instance_id = $1
-		ORDER BY timestamp ASC
+		ORDER BY occurred_at ASC
 	`
 
 	rows, err := r.db.GetDB().QueryContext(ctx, query, instanceID)
@@ -635,19 +776,48 @@ func (r *PostgresEventRepository) ListByInstance(ctx context.Context, instanceID
 	var events []ProcessEvent
 	for rows.Next() {
 		var event ProcessEvent
+		var payload []byte
+		var occurredAt time.Time
 		if err := rows.Scan(
 			&event.ID,
 			&event.InstanceID,
-			&event.TokenID,
-			&event.ElementID,
-			&event.Type,
-			&event.Variables,
-			&event.Timestamp,
+			&event.NodeID,
+			&event.NodeName,
+			&event.NodeType,
+			&event.Action,
+			&payload,
+			&occurredAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan event: %w", err)
 		}
+		event.OccurredAt = occurredAt
+		_ = json.Unmarshal(payload, &event.Payload)
 		events = append(events, event)
 	}
 
 	return events, nil
+}
+
+// GetEvents returns events for an instance (alias for compatibility)
+func (r *PostgresEventRepository) GetEvents(ctx context.Context, instanceID string) ([]map[string]interface{}, error) {
+	events, err := r.ListByInstance(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]map[string]interface{}, len(events))
+	for i, e := range events {
+		result[i] = map[string]interface{}{
+			"id":          e.ID,
+			"instance_id": e.InstanceID,
+			"node_id":     e.NodeID,
+			"node_name":   e.NodeName,
+			"node_type":   e.NodeType,
+			"action":      e.Action,
+			"payload":     e.Payload,
+			"occurred_at": e.OccurredAt,
+		}
+	}
+
+	return result, nil
 }

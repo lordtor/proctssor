@@ -1,0 +1,6 @@
+{
+      "id": "bpmn-nats",
+      "name": "BPMN NATS",
+      "hosts": [{"id": "default", "url": "nats://nats:4222", "name": "Default"}],
+      "settings": {"lazy_start": false}
+    }

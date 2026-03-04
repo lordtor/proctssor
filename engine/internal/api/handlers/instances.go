@@ -343,3 +343,169 @@ func (h *InstanceHandler) GetTaskForm(c *gin.Context) {
 
 	c.JSON(http.StatusOK, form)
 }
+
+// ClaimTaskRequest represents a task claim request
+type ClaimTaskRequest struct {
+	UserID string `json:"user_id"`
+}
+
+// ClaimTask godoc
+// @Summary Claim a task
+// @Description Assign a task to a user
+// @Tags tasks
+// @Accept json
+// @Produce json
+// @Param id path string true "Task ID"
+// @Param request body ClaimTaskRequest true "Claim request"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/tasks/{id}/claim [post]
+func (h *InstanceHandler) ClaimTask(c *gin.Context) {
+	taskID := c.Param("id")
+
+	var req ClaimTaskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Try to get user from header or use default
+		req.UserID = c.GetHeader("X-User-ID")
+		if req.UserID == "" {
+			req.UserID = "anonymous"
+		}
+	}
+
+	err := h.instanceService.ClaimTask(c.Request.Context(), taskID, req.UserID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Task claimed", "task_id": taskID})
+}
+
+// UnclaimTask godoc
+// @Summary Unclaim a task
+// @Description Remove assignment from a task
+// @Tags tasks
+// @Produce json
+// @Param id path string true "Task ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/tasks/{id}/unclaim [post]
+func (h *InstanceHandler) UnclaimTask(c *gin.Context) {
+	taskID := c.Param("id")
+
+	err := h.instanceService.UnclaimTask(c.Request.Context(), taskID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Task unclaimed", "task_id": taskID})
+}
+
+// DelegateTaskRequest represents a task delegation request
+type DelegateTaskRequest struct {
+	UserID string `json:"user_id"`
+}
+
+// DelegateTask godoc
+// @Summary Delegate a task
+// @Description Delegate a task to another user
+// @Tags tasks
+// @Accept json
+// @Produce json
+// @Param id path string true "Task ID"
+// @Param request body DelegateTaskRequest true "Delegation request"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/tasks/{id}/delegate [post]
+func (h *InstanceHandler) DelegateTask(c *gin.Context) {
+	taskID := c.Param("id")
+
+	var req DelegateTaskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is required"})
+		return
+	}
+
+	err := h.instanceService.DelegateTask(c.Request.Context(), taskID, req.UserID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Task delegated", "task_id": taskID, "delegate_to": req.UserID})
+}
+
+// GetTaskHistory godoc
+// @Summary Get task history
+// @Description Get history of completed tasks
+// @Tags tasks
+// @Produce json
+// @Param limit query int false "Limit results"
+// @Success 200 {array} postgres.UserTask
+// @Router /api/v1/tasks/history [get]
+func (h *InstanceHandler) GetTaskHistory(c *gin.Context) {
+	limit := 100
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil {
+			limit = parsed
+		}
+	}
+
+	tasks, err := h.instanceService.GetTaskHistory(c.Request.Context(), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if tasks == nil {
+		tasks = []postgres.UserTask{}
+	}
+
+	c.JSON(http.StatusOK, tasks)
+}
+
+// GetTokens godoc
+// @Summary Get instance tokens
+// @Description Get tokens for a process instance
+// @Tags instances
+// @Produce json
+// @Param id path string true "Instance ID"
+// @Success 200 {array} map[string]interface{}
+// @Router /api/v1/instances/{id}/tokens [get]
+func (h *InstanceHandler) GetTokens(c *gin.Context) {
+	instanceID := c.Param("id")
+
+	tokens, err := h.instanceService.GetTokens(c.Request.Context(), instanceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if tokens == nil {
+		tokens = []map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, tokens)
+}
+
+// GetEvents godoc
+// @Summary Get instance events
+// @Description Get events for a process instance
+// @Tags instances
+// @Produce json
+// @Param id path string true "Instance ID"
+// @Success 200 {array} map[string]interface{}
+// @Router /api/v1/instances/{id}/events [get]
+func (h *InstanceHandler) GetEvents(c *gin.Context) {
+	instanceID := c.Param("id")
+
+	events, err := h.instanceService.GetEvents(c.Request.Context(), instanceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if events == nil {
+		events = []map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, events)
+}

@@ -1,0 +1,154 @@
+openapi: 3.0.3
+info:
+  title: Notification Service API
+  description: |
+    Notification service for workflow automation.
+    
+    This service provides notification capabilities for workflow automation,
+    supporting email, Slack messages, and webhooks.
+  version: 1.0.0
+  contact:
+    name: Workflow Engine Team
+
+servers:
+  - url: http://localhost:8082
+    description: Development server
+  - url: http://notification-service:8082
+    description: Docker server
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Notifications
+    description: Notification operations
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: |
+        Returns the health status of the service.
+        Checks NATS connectivity.
+      operationId: getHealth
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /ready:
+    get:
+      summary: Readiness check
+      description: |
+        Returns whether the service is ready to accept traffic.
+        Service is ready when NATS is connected.
+      operationId: getReady
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: Service is not ready
+
+  /live:
+    get:
+      summary: Liveness check
+      description: |
+        Returns whether the service is alive.
+        Used by Kubernetes for liveness probes.
+      operationId: getLive
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is alive
+
+  /info:
+    get:
+      summary: Service information
+      description: Returns information about the service
+      operationId: getInfo
+      tags:
+        - Service
+      responses:
+        '200':
+          description: Service information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceInfo'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          description: Overall health status
+        service_name:
+          type: string
+          description: Service name
+        timestamp:
+          type: string
+          format: date-time
+          description: Current timestamp
+        uptime_seconds:
+          type: integer
+          description: Service uptime in seconds
+        checks:
+          type: object
+          additionalProperties:
+            type: boolean
+          description: Individual component health checks
+      required:
+        - status
+        - service_name
+        - timestamp
+
+    ReadyResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready, not ready]
+      required:
+        - status
+
+    ServiceInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        operations:
+          type: array
+          items:
+            type: string
+          description: Available operations
+        endpoints:
+          type: array
+          items:
+            type: string
+      required:
+        - name
+        - version

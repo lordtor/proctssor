@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useMonitorStore, ProcessInstance } from './store';
 import DiagramViewer from './components/DiagramViewer';
 import TokenTracker from './components/TokenTracker';
 import VariablesPanel from './components/VariablesPanel';
+import MetricsDashboard from './components/MetricsDashboard';
 
 const styles = {
   container: {
@@ -55,6 +56,14 @@ const styles = {
     borderRadius: '4px',
     fontSize: '12px',
     cursor: 'pointer',
+  },
+  activeTab: {
+    backgroundColor: '#1a1a2e',
+    color: '#fff',
+  },
+  inactiveTab: {
+    backgroundColor: '#f0f0f0',
+    color: '#666',
   },
   instanceList: {
     flex: 1,
@@ -162,6 +171,41 @@ const styles = {
     overflowY: 'auto' as const,
     padding: '15px',
   },
+  breadcrumb: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
+    color: '#666',
+  },
+  breadcrumbItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  breadcrumbLink: {
+    color: '#1a1a2e',
+    cursor: 'pointer',
+    textDecoration: 'underline',
+  },
+  breadcrumbSeparator: {
+    color: '#999',
+  },
+  breadcrumbCurrent: {
+    color: '#1a1a2e',
+    fontWeight: 500,
+  },
+  backButton: {
+    padding: '6px 12px',
+    border: '1px solid #e0e0e0',
+    borderRadius: '4px',
+    backgroundColor: '#fff',
+    cursor: 'pointer',
+    fontSize: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
 };
 
 const mockInstances: ProcessInstance[] = [
@@ -195,6 +239,8 @@ const mockInstances: ProcessInstance[] = [
 ];
 
 export default function Monitor() {
+  const [activeTab, setActiveTab] = useState<'instances' | 'metrics'>('instances');
+  
   const {
     instances,
     selectedInstance,
@@ -202,6 +248,8 @@ export default function Monitor() {
     events,
     loading,
     wsConnected,
+    processStack,
+    currentProcessDefinitionId,
     fetchInstances,
     selectInstance,
     terminateInstance,
@@ -209,6 +257,9 @@ export default function Monitor() {
     resumeInstance,
     connectWebSocket,
     disconnectWebSocket,
+    drillDown,
+    drillUp,
+    resetNavigation,
   } = useMonitorStore();
 
   useEffect(() => {
@@ -250,53 +301,66 @@ export default function Monitor() {
             <span>{wsConnected ? 'Connected' : 'Disconnected'}</span>
           </div>
           <div style={styles.filterButtons}>
-            <button style={{ ...styles.filterButton, backgroundColor: '#1a1a2e', color: '#fff' }}>
-              All
+            <button 
+              style={{ ...styles.filterButton, ...(activeTab === 'instances' ? styles.activeTab : styles.inactiveTab) }}
+              onClick={() => setActiveTab('instances')}
+            >
+              Instances
             </button>
-            <button style={{ ...styles.filterButton, backgroundColor: '#f0f0f0', color: '#666' }}>
-              Active
-            </button>
-            <button style={{ ...styles.filterButton, backgroundColor: '#f0f0f0', color: '#666' }}>
-              Completed
+            <button 
+              style={{ ...styles.filterButton, ...(activeTab === 'metrics' ? styles.activeTab : styles.inactiveTab) }}
+              onClick={() => setActiveTab('metrics')}
+            >
+              Metrics
             </button>
           </div>
         </div>
 
-        <div style={styles.instanceList}>
-          {loading && <div style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}
-          
-          {displayInstances.map((instance) => (
-            <div
-              key={instance.id}
-              style={{
-                ...styles.instanceCard,
-                ...(selectedInstance?.id === instance.id ? styles.selectedInstance : {}),
-              }}
-              onClick={() => selectInstance(instance)}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={styles.instanceName}>{instance.processDefinitionKey}</div>
-                <span style={getStatusBadgeStyle(instance.status)}>{instance.status}</span>
+        {activeTab === 'instances' ? (
+          <div style={styles.instanceList}>
+            {loading && <div style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}
+            
+            {displayInstances.map((instance) => (
+              <div
+                key={instance.id}
+                style={{
+                  ...styles.instanceCard,
+                  ...(selectedInstance?.id === instance.id ? styles.selectedInstance : {}),
+                }}
+                onClick={() => selectInstance(instance)}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={styles.instanceName}>{instance.processDefinitionKey}</div>
+                  <span style={getStatusBadgeStyle(instance.status)}>{instance.status}</span>
+                </div>
+                <div style={styles.instanceMeta}>
+                  ID: {instance.id}
+                </div>
+                <div style={styles.instanceMeta}>
+                  Started: {new Date(instance.startTime).toLocaleString()}
+                </div>
               </div>
-              <div style={styles.instanceMeta}>
-                ID: {instance.id}
+            ))}
+            
+            {!loading && displayInstances.length === 0 && (
+              <div style={{ padding: '20px', textAlign: 'center', color: '#999' }}>
+                No instances found
               </div>
-              <div style={styles.instanceMeta}>
-                Started: {new Date(instance.startTime).toLocaleString()}
-              </div>
-            </div>
-          ))}
-          
-          {!loading && displayInstances.length === 0 && (
-            <div style={{ padding: '20px', textAlign: 'center', color: '#999' }}>
-              No instances found
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        ) : (
+          <div style={styles.instanceList}>
+            <MetricsDashboard compact />
+          </div>
+        )}
       </div>
 
       <div style={styles.main}>
-        {selectedInstance ? (
+        {activeTab === 'metrics' ? (
+          <div style={{ padding: '20px', overflow: 'auto' }}>
+            <MetricsDashboard />
+          </div>
+        ) : selectedInstance ? (
           <>
             <div style={styles.toolbar}>
               <div style={{ fontSize: '16px', fontWeight: 500 }}>
@@ -333,9 +397,47 @@ export default function Monitor() {
 
             <div style={styles.content}>
               <div style={styles.diagramContainer}>
+                {/* Breadcrumb navigation */}
+                {(processStack.length > 0 || currentProcessDefinitionId) && (
+                  <div style={{ 
+                    padding: '12px 20px', 
+                    borderBottom: '1px solid #e0e0e0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }}>
+                    {(processStack.length > 0 || currentProcessDefinitionId) && (
+                      <button
+                        style={styles.backButton}
+                        onClick={() => drillUp()}
+                      >
+                        ← Back
+                      </button>
+                    )}
+                    <div style={styles.breadcrumb}>
+                      <span 
+                        style={styles.breadcrumbLink}
+                        onClick={() => resetNavigation()}
+                      >
+                        {selectedInstance.processDefinitionKey}
+                      </span>
+                      {processStack.map((item, index) => (
+                        <span key={index} style={styles.breadcrumbItem}>
+                          <span style={styles.breadcrumbSeparator}>›</span>
+                          <span style={styles.breadcrumbCurrent}>
+                            {item.elementName || 'Sub Process'}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <DiagramViewer 
-                  processDefinitionId={selectedInstance.processDefinitionId} 
+                  processDefinitionId={currentProcessDefinitionId || selectedInstance.processDefinitionId} 
                   tokens={tokens}
+                  onSubProcessClick={(subProcessId, elementId) => {
+                    drillDown(subProcessId, elementId);
+                  }}
                 />
               </div>
               
@@ -375,6 +477,10 @@ export default function Monitor() {
               </div>
             </div>
           </>
+        ) : activeTab === 'metrics' ? (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#999' }}>
+            Select 'Metrics' tab to view dashboard
+          </div>
         ) : (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#999' }}>
             Select an instance to view details

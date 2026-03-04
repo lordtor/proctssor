@@ -2,10 +2,15 @@
 
 server:
   host: "0.0.0.0"
-  port: 8080
+  port: "${PORT}"
 
 database:
-  url: "${DATABASE_URL}"
+  host: "${DB_HOST}"
+  port: ${DB_PORT}
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
+  name: "${DB_NAME}"
+  sslmode: "${DB_SSLMODE}"
   max_open_conns: 25
   max_idle_conns: 5
   conn_max_lifetime: 300

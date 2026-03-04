@@ -106,6 +106,7 @@ type Collaboration struct {
 	ProcessRef  string        `xml:"processRef,attr,omitempty"`
 	Participant []Participant `xml:"participant"`
 	MessageFlow []MessageFlow `xml:"messageFlow"`
+	Message     []Message     `xml:"message"`
 }
 
 // Participant represents a participant in a collaboration
@@ -123,11 +124,27 @@ type MessageFlow struct {
 	TargetRef string `xml:"targetRef,attr"`
 }
 
+// Message represents a message definition
+type Message struct {
+	ID      string `xml:"id,attr"`
+	Name    string `xml:"name,attr,omitempty"`
+	ItemRef string `xml:"itemRef,attr,omitempty"`
+}
+
 // FlowElement is an interface implemented by all flow elements
 type FlowElement interface {
 	GetID() string
 	GetName() string
 	GetElementType() FlowElementType
+}
+
+// CompensatableFlowElement is an interface for elements that support compensation
+type CompensatableFlowElement interface {
+	FlowElement
+	// GetCompensateNodeID returns the node ID to execute for compensation
+	GetCompensateNodeID() string
+	// IsCompensatable returns true if this element can be compensated
+	IsCompensatable() bool
 }
 
 // BaseElement is embedded in all BPMN elements
@@ -166,6 +183,12 @@ const (
 	FlowElementTypeSubProcess
 	FlowElementTypeAdHocSubProcess
 	FlowElementTypeTransaction
+	FlowElementTypeBoundaryEvent
+	FlowElementTypeTimerBoundaryEvent
+	FlowElementTypeErrorBoundaryEvent
+	FlowElementTypeCompensationBoundaryEvent
+	FlowElementTypeCompensationEndEvent
+	FlowElementTypeCompensationIntermediateThrowEvent
 )
 
 // StartEvent represents a Start Event
@@ -277,6 +300,9 @@ type ServiceTask struct {
 	Type               string `xml:"type,attr,omitempty"`
 	Retries            string `xml:"retries,attr,omitempty"`
 	RetryCycle         string `xml:"retryCycle,attr,omitempty"`
+	// Saga compensation fields
+	IsForCompensation bool   `xml:"isForCompensation,attr,omitempty"`
+	CompensateNodeID  string `xml:"compensateNodeId,attr,omitempty"`
 }
 
 // GetID returns the element ID
@@ -286,7 +312,22 @@ func (t *ServiceTask) GetID() string { return t.ID }
 func (t *ServiceTask) GetName() string { return t.Name }
 
 // GetElementType returns the element type
-func (t *ServiceTask) GetElementType() FlowElementType { return FlowElementTypeServiceTask }
+func (t *ServiceTask) GetElementType() FlowElementType {
+	if t.IsForCompensation {
+		return FlowElementTypeCompensationIntermediateThrowEvent
+	}
+	return FlowElementTypeServiceTask
+}
+
+// GetCompensateNodeID returns the compensation node ID for this task
+func (t *ServiceTask) GetCompensateNodeID() string {
+	return t.CompensateNodeID
+}
+
+// IsCompensatable returns true if this task can be compensated
+func (t *ServiceTask) IsCompensatable() bool {
+	return t.IsForCompensation || t.CompensateNodeID != ""
+}
 
 // ScriptTask represents a Script Task
 type ScriptTask struct {
@@ -498,6 +539,53 @@ type Transaction struct {
 
 // GetElementType returns the element type
 func (t *Transaction) GetElementType() FlowElementType { return FlowElementTypeTransaction }
+
+// BoundaryEvent represents a boundary event (attached to an activity)
+type BoundaryEvent struct {
+	BaseElement
+	Name                 string                `xml:"name,attr,omitempty"`
+	CancelActivity       string                `xml:"cancelActivity,attr,omitempty"` // true = interrupting, false = non-interrupting
+	AttachedToRef        string                `xml:"attachedToRef,attr,omitempty"`  // Reference to the activity this is attached to
+	Incoming             []string              `xml:"incoming"`
+	Outgoing             []string              `xml:"outgoing"`
+	TimerEventDefinition *TimerEventDefinition `xml:"timerEventDefinition"`
+	ErrorEventDefinition *ErrorEventDefinition `xml:"errorEventDefinition"`
+}
+
+// GetID returns the element ID
+func (e *BoundaryEvent) GetID() string { return e.ID }
+
+// GetName returns the element name
+func (e *BoundaryEvent) GetName() string { return e.Name }
+
+// GetElementType returns the element type
+func (e *BoundaryEvent) GetElementType() FlowElementType {
+	if e.TimerEventDefinition != nil {
+		return FlowElementTypeTimerBoundaryEvent
+	}
+	return FlowElementTypeErrorBoundaryEvent
+}
+
+// IsInterrupting returns true if this is an interrupting boundary event
+func (e *BoundaryEvent) IsInterrupting() bool {
+	return e.CancelActivity != "false"
+}
+
+// TimerEventDefinition defines a timer for boundary events
+type TimerEventDefinition struct {
+	ID           string `xml:"id,attr"`
+	Name         string `xml:"name,attr,omitempty"`
+	TimeDuration string `xml:"timeDuration"` // ISO 8601 duration (e.g., PT5M)
+	TimeDate     string `xml:"timeDate"`     // Specific date/time
+	TimeCycle    string `xml:"timeCycle"`    // Recurring (e.g., R3/PT10M)
+}
+
+// ErrorEventDefinition defines an error for boundary events
+type ErrorEventDefinition struct {
+	ID       string `xml:"id,attr"`
+	Name     string `xml:"name,attr,omitempty"`
+	ErrorRef string `xml:"errorRef,attr,omitempty"` // Reference to error code
+}
 
 // Rendering holds rendering information for tasks
 type Rendering struct {

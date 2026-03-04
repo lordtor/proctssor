@@ -1,0 +1,37 @@
+# Vault Service Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8083
+
+nats:
+  url: "nats://localhost:4222"
+  timeout: 30
+  subscriber:
+    subject_prefix: "wf.cmd.service.vault-service"
+    queue_group: "vault-service"
+
+vault:
+  # Storage backend: memory, file, or postgres
+  storage_backend: "memory"
+  # For file backend - directory to store secrets
+  storage_path: "/data/vault"
+  # For postgres backend
+  postgres_url: "postgres://bpmn:bpmn_secret@postgres:5432/bpmn?sslmode=disable"
+  # Encryption key (32 bytes for AES-256)
+  encryption_key: "your-32-byte-encryption-key-here"
+  # Secret prefix for namespacing
+  secret_prefix: "bpmn"
+
+registry:
+  engine_url: "http://engine:8080"
+  heartbeat_interval: "30s"
+  timeout: "10s"
+
+service:
+  name: "vault-service"
+  type: "external"
+  endpoint: "http://vault-service:8083"
+  metadata:
+    description: "Secret management service for workflow automation"
+    version: "1.0.0"

@@ -15,14 +15,28 @@ export default defineConfig({
         react: { singleton: true, requiredVersion: '^18.2.0', eager: true },
         'react-dom': { singleton: true, requiredVersion: '^18.2.0', eager: true },
         'react-router-dom': { singleton: true, requiredVersion: '^6.20.0' },
+        axios: { singleton: true, requiredVersion: '^1.6.0' },
       },
     }),
   ],
   build: {
     target: 'esnext',
-    minify: false,
+    minify: true,
+    cssMinify: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+        },
+      },
+    },
   },
   server: {
+    port: 3001,
+    strictPort: true,
+    cors: true,
+  },
+  preview: {
     port: 3001,
     strictPort: true,
   },

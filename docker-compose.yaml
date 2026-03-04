@@ -16,6 +16,13 @@ services:
       POSTGRES_USER: bpmn
       POSTGRES_PASSWORD: bpmn_secret
       POSTGRES_DB: bpmn
+      POSTGRES_EXTENSIONS: pg_cron
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_cron"
+      - "-c"
+      - "cron.database_name=bpmn"
     ports:
       - "5432:5432"
     volumes:
@@ -51,7 +58,38 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-
+  # NATS NUI - Web UI для управления NATS
+  nats-nui:
+    image: ghcr.io/nats-nui/nui:latest
+    container_name: bpmn-nats-nui
+    ports:
+      - "31311:31311"
+    environment:
+      # Обязательные переменные для авто-подключения
+      NATS_URL: nats://nats:4222
+      NATS_NAME: "BPMN NATS Cluster"
+      # Опционально: если NATS с авторизацией
+      # NATS_USER: bpmn
+      # NATS_PASSWORD: bpmn_secret
+      # Настройки UI
+      NUI_BIND: 0.0.0.0
+      NUI_PORT: 31311
+    volumes:
+      # Persistent storage для сохранённых соединений (опционально)
+      - nats_nui_data:/app/connections
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - bpmn-network
+    restart: unless-stopped
+    healthcheck:
+      # Проверяем TCP-порт, так как UI может не иметь /health endpoint
+      test: ["CMD", "nc", "-z", "localhost", "31311"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
   # Nginx Reverse Proxy
   nginx:
     build:
@@ -101,6 +139,135 @@ services:
       - bpmn-network
     restart: unless-stopped
 
+  # GitLab Integration Service
+  gitlab-service:
+    build:
+      context: ./gitlab-service
+      dockerfile: Dockerfile
+    container_name: bpmn-gitlab-service
+    environment:
+      NATS_URL: nats://nats:4222
+      ENGINE_URL: http://engine:8080
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8081
+      GITLAB_URL: ${GITLAB_URL:-https://gitlab.com}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      GITLAB_VERIFY_TLS: "true"
+      HEARTBEAT_INTERVAL: 30s
+    ports:
+      - "8081:8081"
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - bpmn-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: bpmn-notification-service
+    environment:
+      NATS_URL: nats://nats:4222
+      ENGINE_URL: http://engine:8080
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8082
+      HEARTBEAT_INTERVAL: 30s
+      SMTP_HOST: ${SMTP_HOST:-localhost}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      FROM_ADDRESS: ${FROM_ADDRESS:-noreply@example.com}
+      FROM_NAME: ${FROM_NAME:-Workflow Engine}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_DEFAULT_CHANNEL: ${SLACK_DEFAULT_CHANNEL:-}
+      WEBHOOK_TIMEOUT: 30s
+      WEBHOOK_RETRY_COUNT: 3
+    ports:
+      - "8082:8082"
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - bpmn-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Vault Service (Secret Management)
+  vault-service:
+    build:
+      context: ./vault-service
+      dockerfile: Dockerfile
+    container_name: bpmn-vault-service
+    environment:
+      NATS_URL: nats://nats:4222
+      ENGINE_URL: http://engine:8080
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8083
+      HEARTBEAT_INTERVAL: 30s
+      VAULT_STORAGE_BACKEND: ${VAULT_STORAGE_BACKEND:-memory}
+      VAULT_SECRET_PREFIX: ${VAULT_SECRET_PREFIX:-bpmn}
+      VAULT_ENCRYPTION_KEY: ${VAULT_ENCRYPTION_KEY:-your-32-byte-encryption-key-here}
+    ports:
+      - "8083:8083"
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - bpmn-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Jira Integration Service
+  # jira-service:
+  #   build:
+  #     context: ./jira-service
+  #     dockerfile: Dockerfile
+  #   container_name: bpmn-jira-service
+  #   environment:
+  #     NATS_URL: nats://nats:4222
+  #     ENGINE_URL: http://engine:8080
+  #     SERVER_HOST: 0.0.0.0
+  #     SERVER_PORT: 8084
+  #     HEARTBEAT_INTERVAL: 30s
+  #     JIRA_URL: ${JIRA_URL:-https://your-domain.atlassian.net}
+  #     JIRA_USERNAME: ${JIRA_USERNAME:-}
+  #     JIRA_TOKEN: ${JIRA_TOKEN:-}
+  #     JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
+  #     JIRA_VERIFY_TLS: "true"
+  #   ports:
+  #     - "8084:8084"
+  #   depends_on:
+  #     nats:
+  #       condition: service_healthy
+  #   networks:
+  #     - bpmn-network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8084/health"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 10s
+
   # Web Frontend (React Micro-frontends)
   web:
     build:
@@ -139,3 +306,4 @@ networks:
 # =============================================================================
 volumes:
   postgres_data:
+  nats_nui_data:

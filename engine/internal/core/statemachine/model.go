@@ -97,8 +97,14 @@ type ExecutionResult struct {
 	// Await indicates the token should wait for external trigger
 	Await bool `json:"await"`
 
-	// AwaitType describes what type of await (user_task, timer, event)
+	// AwaitType describes what type of await (user_task, timer, event, message)
 	AwaitType string `json:"await_type,omitempty"`
+
+	// MessageRef is the message reference for message tasks
+	MessageRef string `json:"message_ref,omitempty"`
+
+	// CorrelationKey is the key used for message correlation
+	CorrelationKey string `json:"correlation_key,omitempty"`
 
 	// Suspended indicates execution should be suspended
 	Suspended bool `json:"suspended"`

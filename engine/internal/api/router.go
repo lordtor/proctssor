@@ -83,6 +83,8 @@ func (r *Router) SetupRoutes() {
 		{
 			processes.POST("/deploy", r.processHandler.Deploy)
 			processes.GET("", r.processHandler.List)
+			processes.GET("/key/:key", r.processHandler.GetByKey)
+			processes.GET("/key/:key/xml", r.processHandler.GetXMLByKey)
 			processes.GET("/:id", r.processHandler.Get)
 			processes.GET("/:id/xml", r.processHandler.GetXML)
 		}
@@ -104,6 +106,10 @@ func (r *Router) SetupRoutes() {
 			instances.POST("/:id/tasks/:taskId/complete", r.instanceHandler.CompleteTask)
 			instances.GET("/:id/tasks/:taskId/form", r.instanceHandler.GetTaskForm)
 
+			// Tokens and Events
+			instances.GET("/:id/tokens", r.instanceHandler.GetTokens)
+			instances.GET("/:id/events", r.instanceHandler.GetEvents)
+
 			// Variables
 			instances.GET("/:id/variables", r.instanceHandler.GetVariables)
 			instances.PUT("/:id/variables", r.instanceHandler.UpdateVariables)
@@ -111,6 +117,15 @@ func (r *Router) SetupRoutes() {
 
 		// Tasks list endpoint
 		v1.GET("/tasks", r.instanceHandler.ListTasks)
+
+		// Task actions endpoints
+		tasks := v1.Group("/tasks")
+		{
+			tasks.POST("/:id/claim", r.instanceHandler.ClaimTask)
+			tasks.POST("/:id/unclaim", r.instanceHandler.UnclaimTask)
+			tasks.POST("/:id/delegate", r.instanceHandler.DelegateTask)
+			tasks.GET("/history", r.instanceHandler.GetTaskHistory)
+		}
 
 		// Registry endpoints
 		registryGroup := v1.Group("/registry")
@@ -122,7 +137,11 @@ func (r *Router) SetupRoutes() {
 		}
 	}
 
-	// WebSocket endpoint
+	// WebSocket endpoints
+	r.engine.GET("/ws", func(c *gin.Context) {
+		// Redirect to instances websocket or handle general WS
+		c.JSON(200, gin.H{"message": "WebSocket endpoint - use /ws/instances/:id"})
+	})
 	r.engine.GET("/ws/instances/:id", r.wsHandler.HandleWebSocket)
 
 	// SSE endpoints

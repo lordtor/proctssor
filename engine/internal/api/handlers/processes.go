@@ -167,6 +167,26 @@ func (h *ProcessHandler) GetXML(c *gin.Context) {
 	c.Data(http.StatusOK, "application/xml", definition)
 }
 
+// GetXMLByKey godoc
+// @Summary Get process XML by key
+// @Description Get the raw BPMN XML for a process by key
+// @Tags processes
+// @Produce application/xml
+// @Param key path string true "Process Key"
+// @Success 200 {string} string
+// @Router /api/v1/processes/key/{key}/xml [get]
+func (h *ProcessHandler) GetXMLByKey(c *gin.Context) {
+	key := c.Param("key")
+
+	_, definition, err := h.repo.GetProcessByKey(c.Request.Context(), key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Data(http.StatusOK, "application/xml", definition)
+}
+
 // GetByKey godoc
 // @Summary Get process by key
 // @Description Get the latest version of a process by key

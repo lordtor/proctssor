@@ -3,7 +3,10 @@ package executor
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/workflow-engine/v2/internal/core/bpmn"
 	"github.com/workflow-engine/v2/internal/core/statemachine"
 	"github.com/workflow-engine/v2/internal/integration/nats"
@@ -104,6 +107,10 @@ func (e *DefaultExecutor) ExecuteNode(ctx context.Context, graph *bpmn.Graph, cu
 		return e.executeScriptTask(ctx, elem, variables)
 	case *bpmn.ManualTask:
 		return e.executeManualTask(ctx, elem, variables)
+	case *bpmn.ReceiveTask:
+		return e.executeReceiveTask(ctx, elem, variables)
+	case *bpmn.SendTask:
+		return e.executeSendTask(ctx, elem, variables)
 	case *bpmn.ExclusiveGateway:
 		return e.executeExclusiveGateway(ctx, graph, elem, variables)
 	case *bpmn.InclusiveGateway:
@@ -114,6 +121,8 @@ func (e *DefaultExecutor) ExecuteNode(ctx context.Context, graph *bpmn.Graph, cu
 		return e.executeIntermediateCatchEvent(ctx, elem, variables)
 	case *bpmn.IntermediateThrowEvent:
 		return e.executeIntermediateThrowEvent(ctx, elem, variables)
+	case *bpmn.BoundaryEvent:
+		return e.executeBoundaryEvent(ctx, graph, elem, variables)
 	default:
 		return nil, fmt.Errorf("unsupported node type: %T for node %s", currentNode, nodeID)
 	}
@@ -186,17 +195,72 @@ func (e *DefaultExecutor) executeDelegateClass(ctx context.Context, class string
 
 // executeExpression executes an expression
 func (e *DefaultExecutor) executeExpression(ctx context.Context, expression string, variables map[string]interface{}) (*statemachine.ExecutionResult, error) {
-	// TODO: Implement expression execution
+	evaluator := NewExpressionEvaluator(variables)
+	_, err := evaluator.Evaluate(expression)
+	if err != nil {
+		e.logger.Error("Failed to evaluate expression", zap.String("expression", expression), zap.Error(err))
+		return nil, fmt.Errorf("expression evaluation failed: %w", err)
+	}
+
+	// Store the evaluated result in variables for potential use
+	if variables == nil {
+		variables = make(map[string]interface{})
+	}
+	variables["_lastExpressionResult"] = true
+
 	return &statemachine.ExecutionResult{
 		Variables: variables,
 	}, nil
 }
 
-// executeExternalTask executes an external task
+// executeExternalTask executes an external task by publishing to NATS
 func (e *DefaultExecutor) executeExternalTask(ctx context.Context, topic string, variables map[string]interface{}) (*statemachine.ExecutionResult, error) {
-	// TODO: Implement external task execution
+	instanceID := GetInstanceID(ctx)
+	nodeID := GetNodeID(ctx)
+
+	if e.natsPublisher == nil {
+		return nil, fmt.Errorf("NATS publisher not configured for external task execution")
+	}
+
+	// Create a token for this execution
+	token := &statemachine.Token{
+		ID:         uuid.New().String(),
+		InstanceID: instanceID,
+		NodeID:     nodeID,
+		Status:     statemachine.TokenStatusWaiting,
+		Variables:  variables,
+	}
+
+	// Publish external task command to NATS
+	cmd := &nats.WorkflowCommand{
+		CommandType:    nats.CommandTypeServiceTask,
+		InstanceID:     instanceID,
+		TokenID:        token.ID,
+		NodeID:         nodeID,
+		ServiceName:    topic,
+		Operation:      "execute",
+		InputVariables: variables,
+		MaxRetries:     3,
+	}
+
+	if err := e.natsPublisher.PublishCommand(ctx, cmd); err != nil {
+		e.logger.Error("Failed to publish external task",
+			zap.String("topic", topic),
+			zap.String("instanceID", instanceID),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to publish external task: %w", err)
+	}
+
+	e.logger.Info("External task published",
+		zap.String("topic", topic),
+		zap.String("instanceID", instanceID),
+		zap.String("tokenID", token.ID))
+
+	// Return await result - external task waits for response
 	return &statemachine.ExecutionResult{
 		Variables: variables,
+		Await:     true,
+		AwaitType: "external_task",
 	}, nil
 }
 
@@ -212,6 +276,62 @@ func (e *DefaultExecutor) executeScriptTask(ctx context.Context, node *bpmn.Scri
 func (e *DefaultExecutor) executeManualTask(ctx context.Context, node *bpmn.ManualTask, variables map[string]interface{}) (*statemachine.ExecutionResult, error) {
 	return &statemachine.ExecutionResult{
 		Variables: variables,
+	}, nil
+}
+
+// executeReceiveTask executes a receive task (waits for message)
+func (e *DefaultExecutor) executeReceiveTask(ctx context.Context, node *bpmn.ReceiveTask, variables map[string]interface{}) (*statemachine.ExecutionResult, error) {
+	// ReceiveTask waits for a message to arrive
+	// It should have a messageRef that identifies the message to wait for
+	return &statemachine.ExecutionResult{
+		Variables:      variables,
+		Await:          true,
+		AwaitType:      "message",
+		MessageRef:     node.MessageRef,
+		CorrelationKey: "businessKey",
+	}, nil
+}
+
+// executeSendTask executes a send task (sends message)
+func (e *DefaultExecutor) executeSendTask(ctx context.Context, node *bpmn.SendTask, variables map[string]interface{}) (*statemachine.ExecutionResult, error) {
+	// SendTask sends a message to another participant
+	// The message is sent via messageRef and can be correlated by business key
+
+	instanceID := GetInstanceID(ctx)
+	businessKey := ""
+	if bk, ok := variables["businessKey"]; ok {
+		if bkStr, ok := bk.(string); ok {
+			businessKey = bkStr
+		}
+	}
+
+	// Publish message command to NATS for cross-process communication
+	if e.natsPublisher != nil && node.MessageRef != "" {
+		cmd := &nats.WorkflowCommand{
+			CommandType:    nats.CommandTypeMessage,
+			InstanceID:     instanceID,
+			NodeID:         node.MessageRef,
+			Operation:      businessKey,
+			InputVariables: variables,
+			MaxRetries:     3,
+		}
+
+		if err := e.natsPublisher.PublishCommand(ctx, cmd); err != nil {
+			e.logger.Error("Failed to send message", zap.Error(err), zap.String("messageRef", node.MessageRef))
+			return nil, fmt.Errorf("failed to send message: %w", err)
+		}
+		e.logger.Info("Message sent", zap.String("messageRef", node.MessageRef), zap.String("instanceID", instanceID))
+	}
+
+	// Move to next node
+	nextNodeID := ""
+	if len(node.Outgoing) > 0 {
+		nextNodeID = node.Outgoing[0]
+	}
+
+	return &statemachine.ExecutionResult{
+		Variables:  variables,
+		NextNodeID: nextNodeID,
 	}, nil
 }
 
@@ -299,6 +419,78 @@ func (e *DefaultExecutor) executeIntermediateThrowEvent(ctx context.Context, nod
 	return &statemachine.ExecutionResult{
 		Variables: variables,
 	}, nil
+}
+
+// executeBoundaryEvent executes a boundary event
+func (e *DefaultExecutor) executeBoundaryEvent(ctx context.Context, graph *bpmn.Graph, node *bpmn.BoundaryEvent, variables map[string]interface{}) (*statemachine.ExecutionResult, error) {
+	// Boundary events are triggered by timer or error, and transition to their outgoing flow
+	if len(node.Outgoing) == 0 {
+		return nil, fmt.Errorf("boundary event %s has no outgoing flows", node.ID)
+	}
+
+	return &statemachine.ExecutionResult{
+		NextNodeID: node.Outgoing[0],
+		Variables:  variables,
+	}, nil
+}
+
+// GetBoundaryEventsForActivity returns boundary events attached to an activity
+func (e *DefaultExecutor) GetBoundaryEventsForActivity(graph *bpmn.Graph, activityID string) []*bpmn.BoundaryEvent {
+	return graph.GetBoundaryEventsForActivity(activityID)
+}
+
+// GetTimerBoundaryEventsForActivity returns timer boundary events attached to an activity
+func (e *DefaultExecutor) GetTimerBoundaryEventsForActivity(graph *bpmn.Graph, activityID string) []*bpmn.BoundaryEvent {
+	return graph.GetTimerBoundaryEventsForActivity(activityID)
+}
+
+// GetErrorBoundaryEventsForActivity returns error boundary events attached to an activity
+func (e *DefaultExecutor) GetErrorBoundaryEventsForActivity(graph *bpmn.Graph, activityID string) []*bpmn.BoundaryEvent {
+	return graph.GetErrorBoundaryEventsForActivity(activityID)
+}
+
+// HasInterruptingBoundaryEvent checks if an activity has an interrupting boundary event
+func (e *DefaultExecutor) HasInterruptingBoundaryEvent(graph *bpmn.Graph, activityID string) bool {
+	return graph.HasInterruptingBoundaryEvent(activityID)
+}
+
+// ParseTimerDuration parses ISO 8601 duration string and returns duration
+func ParseTimerDuration(durationStr string) (time.Duration, error) {
+	// Handle ISO 8601 duration format (e.g., PT5M, PT1H30M, PT10S)
+	return time.ParseDuration(durationStr)
+}
+
+// GetTimerDurationForBoundaryEvent calculates the duration for a timer boundary event
+func GetTimerDurationForBoundaryEvent(be *bpmn.BoundaryEvent) (time.Duration, error) {
+	if be.TimerEventDefinition == nil {
+		return 0, fmt.Errorf("boundary event has no timer definition")
+	}
+
+	if be.TimerEventDefinition.TimeDuration != "" {
+		return ParseTimerDuration(be.TimerEventDefinition.TimeDuration)
+	}
+
+	if be.TimerEventDefinition.TimeCycle != "" {
+		// For cycles, return the first occurrence duration
+		// Format: R3/PT10M means repeat 3 times every 10 minutes
+		// We'll parse just the duration part
+		durationStr := be.TimerEventDefinition.TimeCycle
+		if idx := strings.Index(durationStr, "/"); idx != -1 {
+			durationStr = durationStr[idx+1:]
+		}
+		return ParseTimerDuration(durationStr)
+	}
+
+	if be.TimerEventDefinition.TimeDate != "" {
+		// For specific date, calculate time until that date
+		timeDate, err := time.Parse(time.RFC3339, be.TimerEventDefinition.TimeDate)
+		if err != nil {
+			return 0, fmt.Errorf("invalid timeDate format: %w", err)
+		}
+		return timeDate.Sub(time.Now()), nil
+	}
+
+	return 0, fmt.Errorf("timer boundary event has no valid time definition")
 }
 
 // RegisterTaskHandler registers a custom task handler

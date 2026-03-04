@@ -59,6 +59,7 @@ CREATE TYPE instance_status AS ENUM (
 CREATE TABLE process_instances (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     process_definition_id SERIAL NOT NULL REFERENCES process_definitions(id) ON DELETE RESTRICT,
+    process_key VARCHAR(255) NOT NULL DEFAULT '',
     status instance_status NOT NULL DEFAULT 'pending',
     current_node VARCHAR(255),
     previous_node VARCHAR(255),

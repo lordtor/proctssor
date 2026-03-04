@@ -1,0 +1,33 @@
+# Jira Service Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8084
+
+nats:
+  url: "nats://localhost:4222"
+  timeout: 30
+  subscriber:
+    subject_prefix: "wf.cmd.service.jira-service"
+    queue_group: "jira-service"
+
+jira:
+  url: "https://your-domain.atlassian.net"
+  username: ""
+  token: ""
+  token_file: ""
+  verify_tls: true
+  project_key: ""
+
+registry:
+  engine_url: "http://engine:8080"
+  heartbeat_interval: "30s"
+  timeout: "10s"
+
+service:
+  name: "jira-service"
+  type: "external"
+  endpoint: "http://jira-service:8084"
+  metadata:
+    description: "Jira integration service for workflow automation"
+    version: "1.0.0"

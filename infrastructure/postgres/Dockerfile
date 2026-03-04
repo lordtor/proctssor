@@ -1,11 +1,16 @@
 # PostgreSQL for BPMN Workflow Platform
-FROM postgres:16-alpine
+FROM postgres:15-bookworm
 
-# Install additional tools for migrations
-RUN apk add --no-cache \
-    bash \
+# Install pg_cron extension from PostgreSQL PGDG repository
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    postgresql-contrib
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y postgresql-15-cron \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create migrations directory
 RUN mkdir -p /migrations
